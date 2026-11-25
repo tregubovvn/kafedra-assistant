@@ -2,6 +2,9 @@
 
 const TOKEN_KEY = 'kafedra_token'
 
+// Если приложение опубликовано по подпути (basePath), /api тоже идёт с префиксом
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
+
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null
   return window.localStorage.getItem(TOKEN_KEY)
@@ -32,7 +35,7 @@ export async function api<T = unknown>(
 
   let res: Response
   try {
-    res = await fetch(path, {
+    res = await fetch(BASE_PATH + path, {
       method: opts?.method ?? 'GET',
       headers,
       body: opts?.body !== undefined ? JSON.stringify(opts.body) : undefined,
