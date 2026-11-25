@@ -1,6 +1,10 @@
 services:
   kafedra:
-    build: .
+    build:
+      context: .
+      args:
+        # basePath: для https://tregubovvn.ru/kafedra-assistant
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-}
     container_name: kafedra-assistant
     restart: unless-stopped
     ports:

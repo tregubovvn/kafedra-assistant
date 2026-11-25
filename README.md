@@ -83,47 +83,70 @@ npm run dev                 # http://localhost:3000
 
 ## Развёртывание на сервере (tregubovvn.ru)
 
-Приложение работает за nginx. База данных — PostgreSQL в Supabase, то есть внешний сервис: на сервере не нужны ни файл БД, ни volume, достаточно `DATABASE_URL` в `.env`.
+Приложение — это Node-сервер (Next.js), nginx только проксирует. База — PostgreSQL в Supabase: на сервере не нужны ни файл БД, ни volume, достаточно `DATABASE_URL` и `NEXT_PUBLIC_BASE_PATH` в `.env`.
 
-### Вариант 1: PM2 + nginx (рекомендуемый)
+Публикация: **https://tregubovvn.ru/kafedra-assistant/**, каталог приложения — `/var/www/html/kafedra-assistant`.
+
+### 1. Переменные окружения
 
 ```bash
-# на сервере, один раз
+cd /var/www/html/kafedra-assistant
+cp .env.example .env
+```
+
+В `.env`:
+
+```ini
+DATABASE_URL="postgresql://postgres.jxhwppkpymdzgsqhmxgn:...@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=require"
+NEXT_PUBLIC_BASE_PATH=/kafedra-assistant
+```
+
+`NEXT_PUBLIC_BASE_PATH` нужен и при сборке, и при запуске: с ним Next публикует страницы, статику и `/api` под подпутём. Для локального запуска на `localhost:3000` строку не задавайте.
+
+### 2. Сборка и PM2
+
+```bash
 sudo apt install -y nodejs npm nginx
 sudo npm i -g pm2
 
-# код
-git clone https://github.com/tregubovvn/kafedra-assistant.git
-cd kafedra-assistant
-cp .env.example .env       # вписать строки подключения Supabase
-npm install
-npm run db:push
-npm run db:seed            # демо-данные (ТОЛЬКО для нового проекта: очищает базу)
-
-# сборка и запуск (DEPLOY_MODE=server => обычная сборка под next start)
-DEPLOY_MODE=server npm run build
-pm2 start "npm run start:server" --name kafedra
+cd /var/www/html/kafedra-assistant
+npm ci
+npm run db:push          # схема идемпотентна
+npm run build:server     # DEPLOY_MODE=server next build, basePath берётся из .env
+pm2 start npm --name kafedra -- run start:server
 pm2 save && pm2 startup
 ```
 
-`start:server` в package.json запускает `next start -p 3000` с DEPLOY_MODE=server.
+`start:server` поднимает `next start -p 3000`. Если порт занят — поменяйте его в `package.json` (скрипт `start:server`) и в nginx ниже.
 
-nginx (фрагмент, полный пример — `deploy/nginx.conf.example`):
+### 3. nginx
+
+В конфиг сайта `tregubovvn.ru` добавьте:
 
 ```nginx
-server {
-    server_name tregubovvn.ru;
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
+location /kafedra-assistant {
+    proxy_pass http://127.0.0.1:3000;   # без URI: префикс сохраняется, это basePath Next
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 60s;
 }
 ```
 
-HTTPS: `sudo certbot --nginx -d tregubovvn.ru`.
+Своих редиректов добавлять не нужно: `/kafedra-assistant/` со слэшем Next сам канонизирует на `/kafedra-assistant` (308).
+
+`sudo nginx -t && sudo systemctl reload nginx`. Полный пример — `deploy/nginx.conf.example`.
+
+Проверка: `curl -I https://tregubovvn.ru/kafedra-assistant` → 200,
+`curl https://tregubovvn.ru/kafedra-assistant/api` → `{"message":"Hello, world!"}`.
+
+### 4. Автодеплой
+
+`.github/workflows/main.yml` на push в `main`: копирует репозиторий в `/var/www/html/kafedra-assistant`, затем по SSH выполняет `npm ci`, `npm run db:push`, `npm run build:server` и `pm2 restart kafedra`. Нужны секреты `HOST`, `USERNAME`, `SSH_PRIVATE_KEY`.
+
+HTTPS: `sudo certbot --nginx -d tregubovvn.ru` (если ещё не настроен).
 
 ### Вариант 2: Docker
 
@@ -132,7 +155,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Образ собирает приложение и запускает его на порту 3000; база — внешний PostgreSQL (Supabase), volume больше не используется. Схему применяйте вручную (`npm run db:push`) либо задайте `DB_PUSH=1` — тогда контейнер выполнит `node scripts/db-push.mjs` при старте. Перед контейнером положите nginx-прокси (пример выше).
+Образ собирает приложение и запускает его на порту 3000; база — внешний PostgreSQL (Supabase), volume больше не используется. Для подпути собирайте так: `NEXT_PUBLIC_BASE_PATH=/kafedra-assistant docker compose up -d --build` — значение уходит и в build-arg, и в runtime. Схему применяйте вручную (`npm run db:push`) либо задайте `DB_PUSH=1` — тогда контейнер выполнит `node scripts/db-push.mjs` при старте. Перед контейнером положите nginx-прокси (пример выше).
 
 ## Настройка DeepSeek
 

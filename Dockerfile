@@ -12,8 +12,12 @@ RUN npm install
 
 COPY . .
 
-# DEPLOY_MODE=server — обычная сборка под `next start`
-RUN DEPLOY_MODE=server npm run build
+# Подпуть публикации запекается в сборку (для /kafedra-assistant — build-arg)
+ARG NEXT_PUBLIC_BASE_PATH=
+ENV NEXT_PUBLIC_BASE_PATH=$NEXT_PUBLIC_BASE_PATH
+
+# DEPLOY_MODE=server/db: next build без standalone-копирования
+RUN npm run build:server
 
 ENV NODE_ENV=production \
     PORT=3000 \
