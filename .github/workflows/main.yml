@@ -1,0 +1,24 @@
+name: Deploy Static Site
+
+on:
+  push:
+    branches:
+      - main # Ваша основная ветка
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4.2.2 # Обновленная версия, без предупреждений о Node.js
+
+      - name: Copy files via SSH
+        uses: appleboy/scp-action@v0.1.7 # Специальный экшен для копирования файлов
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22 # Укажите ваш порт (22 или тот, что нашли в sshd_config)
+          source: "." # Копируем всё содержимое репозитория
+          target: "/var/www/html/kafedra-assistant" # Путь к папке сайта на вашем сервере
