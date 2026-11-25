@@ -17,6 +17,11 @@ server {
     # root /var/www/html;
     # location / { try_files $uri $uri/ =404; }
 
+    # Не отдавать dotfiles (.env с паролем БД, .git и т.п.)
+    location ~ /\.(?!well-known) {
+        deny all;
+    }
+
     # Канонический адрес без слэша: Next собирает ссылки от /kafedra-assistant
     location = /kafedra-assistant {
         return 301 /kafedra-assistant/;

@@ -119,6 +119,11 @@ location = /kafedra-assistant/config.js {
     root /var/www/html;
     add_header Cache-Control "no-store";
 }
+
+# Обязательно: в каталоге лежат .env и исходники — закрываем dotfiles
+location ~ /\.(?!well-known) {
+    deny all;
+}
 ```
 
 `sudo nginx -t && sudo systemctl reload nginx`. Полный пример — `deploy/nginx.conf.example`.
