@@ -5,10 +5,5 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"
-    volumes:
-      - kafedra-db:/app/db
     env_file:
       - .env
-
-volumes:
-  kafedra-db:

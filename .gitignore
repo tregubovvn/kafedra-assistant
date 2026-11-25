@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+build/
+
+# секреты: строка подключения к Supabase содержит пароль БД
+.env
+.env.*
+!.env.example
+
+# артефакты
+*.log
+dev.log
+server.log
+db/
+.DS_Store
+Thumbs.db

@@ -4,18 +4,19 @@ import { PrismaClient } from '@prisma/client'
 import { randomBytes, scryptSync } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 
-// Загружаем DATABASE_URL из .env, если он не задан (PrismaClient не читает .env сам)
+// Загружаем DATABASE_URL из .env.local/.env, если он не задан (PrismaClient не читает .env сам)
 if (!process.env.DATABASE_URL) {
-  try {
-    const env = readFileSync(new URL('../.env', import.meta.url), 'utf8')
-    for (const line of env.split('\n')) {
-      const m = line.match(/^\s*DATABASE_URL\s*=\s*(.+?)\s*$/)
+  for (const file of ['../.env.local', '../.env']) {
+    try {
+      const env = readFileSync(new URL(file, import.meta.url), 'utf8')
+      const m = env.match(/^\s*DATABASE_URL\s*=\s*(.+?)\s*$/m)
       if (m) {
-        process.env.DATABASE_URL = m[1]
+        // в .env значение может быть в кавычках — Prisma их не понимает
+        process.env.DATABASE_URL = m[1].replace(/^["']|["']$/g, '')
         break
       }
-    }
-  } catch {}
+    } catch {}
+  }
 }
 
 const db = new PrismaClient()
