@@ -1,6 +1,6 @@
-# Готовый GitHub Actions workflow для деплоя.
+# Готовый GitHub Actions workflow для деплоя статики.
 # Положить в .github/workflows/main.yml (правка этого пути требует токен со scope `workflow`).
-# Секреты репозитория: HOST, USERNAME, SSH_PRIVATE_KEY (те же, что уже используются).
+# Секреты репозитория: HOST, USERNAME, SSH_PRIVATE_KEY.
 
 name: Deploy kafedra-assistant
 
@@ -17,33 +17,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4.2.2
 
-      - name: Copy files via SSH
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Build static site
+        run: |
+          npm ci
+          npm run build:static
+
+      - name: Copy static files via SSH
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          source: "."
+          source: "out/."
           target: "/var/www/html/kafedra-assistant"
-
-      - name: Build and restart on server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script: |
-            set -e
-            cd /var/www/html/kafedra-assistant
-            export NEXT_PUBLIC_BASE_PATH=/kafedra-assistant
-            npm ci
-            npm run db:push
-            npm run build:server
-            if pm2 describe kafedra >/dev/null 2>&1; then
-              pm2 restart kafedra --update-env
-            else
-              pm2 start npm --name kafedra -- run start:server
-            fi
-            pm2 save
+          # config.js живёт только на сервере (в репозитории его нет), поэтому он не перезаписывается
