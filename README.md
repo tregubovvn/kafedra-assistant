@@ -40,27 +40,50 @@
 
 - Next.js 16 (App Router) + TypeScript
 - Tailwind CSS 4 + shadcn/ui (только используемый набор компонентов)
-- Prisma ORM + SQLite
+- Prisma ORM + PostgreSQL (Supabase)
 - lucide-react, sonner (уведомления)
 - Внешние интеграции: DeepSeek API (ключ задаётся в настройках приложения)
 
 ## Локальный запуск
 
-Нужен Node.js 20+ (или Bun).
+Нужен Node.js 20+ (или Bun) и PostgreSQL — проще всего облачный проект Supabase (см. раздел ниже).
 
 ```bash
 npm install                 # или: bun install
-cp .env.example .env        # DATABASE_URL=file:../db/custom.db (относительно prisma/)
+cp .env.example .env        # вписать строки подключения Supabase
 npm run db:push             # создать схему БД
 npm run db:seed             # заполнить демо-данными кафедры ПМН
 npm run dev                 # http://localhost:3000
 ```
 
-Сброс к чистому демо-состоянию: `npm run db:seed` (скрипт сам очищает базу).
+Сброс к чистому демо-состоянию: `npm run db:seed` — скрипт **удаляет все данные** и заливает демо заново, поэтому на боевой базе его запускать нельзя.
+
+## База данных в Supabase
+
+Проект: [`jxhwppkpymdzgsqhmxgn`](https://supabase.com/dashboard/project/jxhwppkpymdzgsqhmxgn).
+
+1. Supabase → **Project Settings → Database → Connection string** (кнопка **Connect**).
+2. Скопируйте строку **Session pooler** (порт 5432) — она работает по IPv4 и поддерживает DDL, поэтому подходит и приложению, и `prisma db push`.
+3. Создайте `.env` из `.env.example` и подставьте пароль БД и регион пулера.
+4. Примените схему: `npm run db:push`.
+5. Демо-данные (только для пустого проекта): `npm run db:seed`.
+
+Прямое подключение `db.<ref>.supabase.co` доступно только по IPv6, поэтому по умолчанию используется пулер. Для transaction pooler (порт 6543) в `DATABASE_URL` добавьте `?pgbouncer=true&connection_limit=1`, а `DIRECT_URL` оставьте на порту 5432 — иначе `db push` не пройдёт.
+
+`.env` в репозиторий не попадает (см. `.gitignore`): в строке подключения лежит пароль БД.
+
+> **Безопасность.** Supabase по умолчанию отдаёт схему `public` через REST API (ключи `anon`/`authenticated`), а таблицы, созданные Prisma, идут без RLS. Если Data API проекта не нужен, закройте таблицы один раз в SQL Editor:
+>
+> ```sql
+> revoke all on all tables in schema public from anon, authenticated;
+> alter default privileges in schema public revoke all on tables from anon, authenticated;
+> ```
+>
+> Приложение ходит в базу под ролью `postgres`, поэтому эти права ему не нужны.
 
 ## Развёртывание на сервере (tregubovvn.ru)
 
-Приложение работает за nginx. Файл базы SQLite и загруженные ресурсы хранятся в `db/`.
+Приложение работает за nginx. База данных — PostgreSQL в Supabase, то есть внешний сервис: на сервере не нужны ни файл БД, ни volume, достаточно `DATABASE_URL` и `DIRECT_URL` в `.env`.
 
 ### Вариант 1: PM2 + nginx (рекомендуемый)
 
@@ -72,10 +95,10 @@ sudo npm i -g pm2
 # код
 git clone https://github.com/tregubovvn/kafedra-assistant.git
 cd kafedra-assistant
-cp .env.example .env       # при необходимости поправьте путь к БД
+cp .env.example .env       # вписать строки подключения Supabase
 npm install
 npm run db:push
-npm run db:seed            # демо-данные (можно пропустить)
+npm run db:seed            # демо-данные (ТОЛЬКО для нового проекта: очищает базу)
 
 # сборка и запуск (DEPLOY_MODE=server => обычная сборка под next start)
 DEPLOY_MODE=server npm run build
@@ -109,7 +132,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Образ собирает приложение и запускает его на порту 3000; база хранится в volume `kafedra-db`. Перед контейнером положите nginx-прокси (пример выше).
+Образ собирает приложение и запускает его на порту 3000; база — внешний PostgreSQL (Supabase), volume больше не используется. Схему применяйте вручную (`npm run db:push`) либо задайте `PRISMA_DB_PUSH=1` — тогда контейнер выполнит `prisma db push` при старте. Перед контейнером положите nginx-прокси (пример выше).
 
 ## Настройка DeepSeek
 
@@ -142,6 +165,7 @@ docker compose up -d --build
 ## Структура
 
 ```
+.env.example                # шаблон подключения к Supabase (DATABASE_URL, DIRECT_URL)
 prisma/schema.prisma        # модель данных
 scripts/seed.mjs            # демо-данные кафедры ПМН
 src/app/page.tsx            # SPA: вход + маршрутизация по роли
