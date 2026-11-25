@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { sql } from '@/lib/db'
 import { getSessionUser } from '@/lib/server/auth'
 
 // Помощь DeepSeek в формулировании поручения (только заведующий)
@@ -12,8 +12,10 @@ export async function POST(req: Request) {
   const draft = typeof body?.draft === 'string' ? body.draft.trim() : ''
   if (draft.length < 3) return NextResponse.json({ error: 'Введите черновик поручения' }, { status: 400 })
 
-  const settings = await db.settings.findUnique({ where: { id: 1 } })
-  const key = settings?.deepseekApiKey ?? ''
+  const settings = await sql<{ deepseekApiKey: string }[]>`
+    select "deepseekApiKey" from "Settings" where id = 1 limit 1
+  `
+  const key = settings[0]?.deepseekApiKey ?? ''
   if (!key) {
     return NextResponse.json({ error: 'Ключ DeepSeek не задан. Укажите его во вкладке «Настройки».' }, { status: 400 })
   }

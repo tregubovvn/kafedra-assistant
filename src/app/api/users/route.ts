@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { sql } from '@/lib/db'
 import { getSessionUser, hashPassword, generatePassword } from '@/lib/server/auth'
 
 // Список пользователей (только заведующий)
@@ -8,10 +8,11 @@ export async function GET(req: Request) {
   if (!me) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 })
   if (me.role !== 'HEAD') return NextResponse.json({ error: 'Доступно только заведующему' }, { status: 403 })
 
-  const users = await db.user.findMany({
-    orderBy: [{ role: 'desc' }, { fullName: 'asc' }],
-    select: { id: true, email: true, fullName: true, role: true, createdAt: true },
-  })
+  const users = await sql`
+    select id, email, "fullName", role, "createdAt"
+    from "User"
+    order by role desc, "fullName" asc
+  `
   return NextResponse.json({ users })
 }
 
@@ -27,26 +28,28 @@ export async function POST(req: Request) {
   if (!fullName || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return NextResponse.json({ error: 'Укажите ФИО и корректный e-mail' }, { status: 400 })
   }
-  const exists = await db.user.findUnique({ where: { email } })
-  if (exists) return NextResponse.json({ error: 'Пользователь с таким e-mail уже существует' }, { status: 400 })
+
+  const exists = await sql`select 1 from "User" where email = ${email} limit 1`
+  if (exists.length > 0) return NextResponse.json({ error: 'Пользователь с таким e-mail уже существует' }, { status: 400 })
 
   const password = generatePassword()
-  const user = await db.user.create({
-    data: { fullName, email, role: 'TEACHER', passwordHash: hashPassword(password) },
-  })
+  const rows = await sql<{ id: number; email: string; fullName: string; role: string }[]>`
+    insert into "User" ("fullName", email, role, "passwordHash")
+    values (${fullName}, ${email}, 'TEACHER', ${hashPassword(password)})
+    returning id, email, "fullName", role
+  `
+  const user = rows[0]
 
-  await db.mailLog.create({
-    data: {
-      toEmail: email,
-      toName: fullName,
-      type: 'ACCOUNT_CREATED',
-      subject: 'Создана учётная запись преподавателя',
-      body: `Здравствуйте, ${fullName}!\n\nДля вас создана учётная запись в приложении «Ассистент кафедры ПМН».\nВход: ${email}\nПароль: ${password}\n\nПриложение: https://tregubovvn.ru/`,
-    },
-  })
+  await sql`
+    insert into "MailLog" ("toEmail", "toName", type, subject, body)
+    values (
+      ${email},
+      ${fullName},
+      'ACCOUNT_CREATED',
+      'Создана учётная запись преподавателя',
+      ${`Здравствуйте, ${fullName}!\n\nДля вас создана учётная запись в приложении «Ассистент кафедры ПМН».\nВход: ${email}\nПароль: ${password}\n\nПриложение: https://tregubovvn.ru/`}
+    )
+  `
 
-  return NextResponse.json({
-    user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role },
-    password,
-  })
+  return NextResponse.json({ user, password })
 }

@@ -40,7 +40,7 @@
 
 - Next.js 16 (App Router) + TypeScript
 - Tailwind CSS 4 + shadcn/ui (только используемый набор компонентов)
-- Prisma ORM + PostgreSQL (Supabase)
+- PostgreSQL (Supabase) + postgres.js — запросы явным SQL, без ORM
 - lucide-react, sonner (уведомления)
 - Внешние интеграции: DeepSeek API (ключ задаётся в настройках приложения)
 
@@ -63,16 +63,16 @@ npm run dev                 # http://localhost:3000
 Проект: [`jxhwppkpymdzgsqhmxgn`](https://supabase.com/dashboard/project/jxhwppkpymdzgsqhmxgn).
 
 1. Supabase → **Project Settings → Database → Connection string** (кнопка **Connect**).
-2. Скопируйте строку **Session pooler** (порт 5432) — она работает по IPv4 и поддерживает DDL, поэтому подходит и приложению, и `prisma db push`.
+2. Скопируйте строку **Session pooler** (порт 5432) — она работает по IPv4 и поддерживает DDL, поэтому подходит и приложению, и `npm run db:push`.
 3. Создайте `.env` из `.env.example` и подставьте пароль БД и регион пулера.
-4. Примените схему: `npm run db:push`.
+4. Примените схему: `npm run db:push` (выполняет `db/schema.sql`, повторный запуск безопасен).
 5. Демо-данные (только для пустого проекта): `npm run db:seed`.
 
-Прямое подключение `db.<ref>.supabase.co` доступно только по IPv6, поэтому по умолчанию используется пулер. Для transaction pooler (порт 6543) в `DATABASE_URL` добавьте `?pgbouncer=true&connection_limit=1`, а `DIRECT_URL` оставьте на порту 5432 — иначе `db push` не пройдёт.
+Прямое подключение `db.<ref>.supabase.co` доступно только по IPv6, поэтому по умолчанию используется пулер. Для transaction pooler (порт 6543) в `DATABASE_URL` добавьте `?pgbouncer=true&connection_limit=1` — клиент работает с `prepare: false`. DDL через порт 6543 не проходит: для `npm run db:push` временно берите Session pooler.
 
 `.env` в репозиторий не попадает (см. `.gitignore`): в строке подключения лежит пароль БД.
 
-> **Безопасность.** Supabase по умолчанию отдаёт схему `public` через REST API (ключи `anon`/`authenticated`), а таблицы, созданные Prisma, идут без RLS. Если Data API проекта не нужен, закройте таблицы один раз в SQL Editor:
+> **Безопасность.** Supabase по умолчанию отдаёт схему `public` через REST API (ключи `anon`/`authenticated`), а таблицы приложения создаются без RLS. Если Data API проекта не нужен, закройте таблицы один раз в SQL Editor:
 >
 > ```sql
 > revoke all on all tables in schema public from anon, authenticated;
@@ -83,7 +83,7 @@ npm run dev                 # http://localhost:3000
 
 ## Развёртывание на сервере (tregubovvn.ru)
 
-Приложение работает за nginx. База данных — PostgreSQL в Supabase, то есть внешний сервис: на сервере не нужны ни файл БД, ни volume, достаточно `DATABASE_URL` и `DIRECT_URL` в `.env`.
+Приложение работает за nginx. База данных — PostgreSQL в Supabase, то есть внешний сервис: на сервере не нужны ни файл БД, ни volume, достаточно `DATABASE_URL` в `.env`.
 
 ### Вариант 1: PM2 + nginx (рекомендуемый)
 
@@ -132,7 +132,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Образ собирает приложение и запускает его на порту 3000; база — внешний PostgreSQL (Supabase), volume больше не используется. Схему применяйте вручную (`npm run db:push`) либо задайте `PRISMA_DB_PUSH=1` — тогда контейнер выполнит `prisma db push` при старте. Перед контейнером положите nginx-прокси (пример выше).
+Образ собирает приложение и запускает его на порту 3000; база — внешний PostgreSQL (Supabase), volume больше не используется. Схему применяйте вручную (`npm run db:push`) либо задайте `DB_PUSH=1` — тогда контейнер выполнит `node scripts/db-push.mjs` при старте. Перед контейнером положите nginx-прокси (пример выше).
 
 ## Настройка DeepSeek
 
@@ -144,7 +144,7 @@ docker compose up -d --build
 
 Правило: e-mail в последний день срока тем, кто не выполнил. В прототипе — кнопка «Отправить напоминания» во вкладке «Почта» и запись в журнал; при публикации подключается SMTP и cron (`POST /api/mail {"action":"send-reminders"}` из планировщика).
 
-## Модель данных (Prisma)
+## Модель данных (PostgreSQL)
 
 - `User` — заведующий (HEAD) и преподаватели (TEACHER), пароли — scrypt
 - `Session` — токены входа
@@ -165,8 +165,9 @@ docker compose up -d --build
 ## Структура
 
 ```
-.env.example                # шаблон подключения к Supabase (DATABASE_URL, DIRECT_URL)
-prisma/schema.prisma        # модель данных
+.env.example                # шаблон подключения к Supabase (DATABASE_URL)
+db/schema.sql               # схема БД (применяется npm run db:push)
+scripts/db-push.mjs         # применение схемы
 scripts/seed.mjs            # демо-данные кафедры ПМН
 src/app/page.tsx            # SPA: вход + маршрутизация по роли
 src/app/api/                # REST API (auth, works, assignments, schedule, replacements, settings, deepseek, mail)

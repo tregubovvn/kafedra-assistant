@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { sql } from '@/lib/db'
 import { getSessionUser } from '@/lib/server/auth'
 import { fmtDate, pairTime } from '@/lib/schedule'
+
+type Outcome = { ok: true } | { error: string; status: number }
 
 // Ручное назначение замены заведующим кафедрой
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -17,79 +19,120 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const teacherId = Number(body?.teacherId)
   if (!Number.isInteger(teacherId)) return NextResponse.json({ error: 'Выберите преподавателя' }, { status: 400 })
 
-  const replacement = await db.replacement.findUnique({ where: { id: replacementId } })
-  if (!replacement) return NextResponse.json({ error: 'Замена не найдена' }, { status: 404 })
-  if (replacement.status !== 'SEARCHING') {
-    return NextResponse.json({ error: 'Замена уже подобрана' }, { status: 409 })
-  }
+  const outcome = await sql.begin(async (tx): Promise<Outcome> => {
+    const replacement = await tx<{
+      id: number
+      discipline: string
+      groupId: string
+      kind: string
+      room: string | null
+      lessonDate: string
+      pairNumber: number
+      initiatorId: number
+      status: string
+    }[]>`
+      select id, discipline, "groupId", kind, room, "lessonDate", "pairNumber", "initiatorId", status
+      from "Replacement"
+      where id = ${replacementId}
+    `
+    const r = replacement[0]
+    if (!r) return { error: 'Замена не найдена', status: 404 }
+    if (r.status !== 'SEARCHING') return { error: 'Замена уже подобрана', status: 409 }
 
-  const target = await db.user.findUnique({ where: { id: teacherId } })
-  if (!target) return NextResponse.json({ error: 'Преподаватель не найден' }, { status: 404 })
-  if (target.id === replacement.initiatorId) {
-    return NextResponse.json({ error: 'Нельзя назначить самого инициатора' }, { status: 400 })
-  }
-
-  // Проверка занятости назначаемого
-  const baseLesson = await db.scheduleEntry.findFirst({
-    where: { ownerType: 'TEACHER', ownerId: String(teacherId), date: replacement.lessonDate, pairNumber: replacement.pairNumber },
-  })
-  if (baseLesson) {
-    const freed = await db.replacement.findFirst({
-      where: { initiatorId: teacherId, lessonDate: replacement.lessonDate, pairNumber: replacement.pairNumber, status: 'FOUND' },
-    })
-    if (!freed) {
-      return NextResponse.json({ error: `У ${target.fullName} есть занятие в это время` }, { status: 409 })
+    const targetRows = await tx<{ id: number; email: string; fullName: string }[]>`
+      select id, email, "fullName" from "User" where id = ${teacherId}
+    `
+    const target = targetRows[0]
+    if (!target) return { error: 'Преподаватель не найден', status: 404 }
+    if (target.id === r.initiatorId) {
+      return { error: 'Нельзя назначить самого инициатора', status: 400 }
     }
-  }
-  const takenSame = await db.replacement.findFirst({
-    where: { substituteId: teacherId, lessonDate: replacement.lessonDate, pairNumber: replacement.pairNumber, status: 'FOUND' },
-  })
-  if (takenSame) {
-    return NextResponse.json({ error: `${target.fullName} уже взял(а) замену на это время` }, { status: 409 })
-  }
 
-  await db.replacement.update({
-    where: { id: replacementId },
-    data: { status: 'FOUND', substituteId: teacherId, assignedByHead: true },
-  })
-  await db.replacementRequest.updateMany({
-    where: { replacementId, status: 'PENDING' },
-    data: { status: 'CANCELLED' },
+    // Проверка занятости назначаемого
+    const baseLesson = await tx`
+      select 1 from "ScheduleEntry"
+      where "ownerType" = 'TEACHER' and "ownerId" = ${String(teacherId)}
+        and date = ${r.lessonDate} and "pairNumber" = ${r.pairNumber}
+      limit 1
+    `
+    if (baseLesson.length > 0) {
+      const freed = await tx`
+        select 1 from "Replacement"
+        where "initiatorId" = ${teacherId} and "lessonDate" = ${r.lessonDate}
+          and "pairNumber" = ${r.pairNumber} and status = 'FOUND'
+        limit 1
+      `
+      if (freed.length === 0) {
+        return { error: `У ${target.fullName} есть занятие в это время`, status: 409 }
+      }
+    }
+    const takenSame = await tx`
+      select 1 from "Replacement"
+      where "substituteId" = ${teacherId} and "lessonDate" = ${r.lessonDate}
+        and "pairNumber" = ${r.pairNumber} and status = 'FOUND'
+      limit 1
+    `
+    if (takenSame.length > 0) {
+      return { error: `${target.fullName} уже взял(а) замену на это время`, status: 409 }
+    }
+
+    const updated = await tx<{ id: number }[]>`
+      update "Replacement"
+      set status = 'FOUND', "substituteId" = ${teacherId}, "assignedByHead" = true
+      where id = ${replacementId} and status = 'SEARCHING'
+      returning id
+    `
+    if (updated.length === 0) return { error: 'Замена уже подобрана', status: 409 }
+
+    await tx`
+      update "ReplacementRequest" set status = 'CANCELLED'
+      where "replacementId" = ${replacementId} and status = 'PENDING'
+    `
+
+    const t = pairTime(r.pairNumber)
+    await tx`
+      insert into "Work" ("userId", date, type, description, "replacementId", "autoGenerated")
+      values (
+        ${teacherId},
+        ${r.lessonDate},
+        'TEACHING',
+        ${`Замена: ${r.discipline} (${r.kind}), группа ${r.groupId}, ${fmtDate(r.lessonDate)}, ${t.start}–${t.end}`},
+        ${r.id},
+        true
+      )
+    `
+
+    const initiatorRows = await tx<{ email: string; fullName: string }[]>`
+      select email, "fullName" from "User" where id = ${r.initiatorId}
+    `
+    if (initiatorRows.length > 0) {
+      const i = initiatorRows[0]
+      await tx`
+        insert into "MailLog" ("toEmail", "toName", type, subject, body)
+        values (
+          ${i.email},
+          ${i.fullName},
+          'REPLACEMENT_ASSIGNED',
+          ${`Замена назначена: ${r.discipline}`},
+          ${`Здравствуйте, ${i.fullName}!\n\nЗаведующий кафедрой назначил замену на ваше занятие:\n${r.discipline}, группа ${r.groupId}, ${fmtDate(r.lessonDate)}\n\nЗаменяет: ${target.fullName}.`}
+        )
+      `
+    }
+
+    await tx`
+      insert into "MailLog" ("toEmail", "toName", type, subject, body)
+      values (
+        ${target.email},
+        ${target.fullName},
+        'REPLACEMENT_ASSIGNED',
+        ${`Вы назначены на замену: ${r.discipline}`},
+        ${`Здравствуйте, ${target.fullName}!\n\nЗаведующий кафедрой назначил вас на замену:\n${r.discipline} (${r.kind}), группа ${r.groupId}\nДата: ${fmtDate(r.lessonDate)}, ${r.pairNumber}-я пара (${t.start}–${t.end}), ауд. ${r.room ?? '—'}\n\nЗанятие автоматически добавлено в ваш журнал работ.`}
+      )
+    `
+
+    return { ok: true }
   })
 
-  const t = pairTime(replacement.pairNumber)
-  await db.work.create({
-    data: {
-      userId: teacherId,
-      date: replacement.lessonDate,
-      type: 'TEACHING',
-      description: `Замена: ${replacement.discipline} (${replacement.kind}), группа ${replacement.groupId}, ${fmtDate(replacement.lessonDate)}, ${t.start}–${t.end}`,
-      replacementId: replacement.id,
-      autoGenerated: true,
-    },
-  })
-
-  const initiator = await db.user.findUnique({ where: { id: replacement.initiatorId } })
-  if (initiator) {
-    await db.mailLog.create({
-      data: {
-        toEmail: initiator.email,
-        toName: initiator.fullName,
-        type: 'REPLACEMENT_ASSIGNED',
-        subject: `Замена назначена: ${replacement.discipline}`,
-        body: `Здравствуйте, ${initiator.fullName}!\n\nЗаведующий кафедрой назначил замену на ваше занятие:\n${replacement.discipline}, группа ${replacement.groupId}, ${fmtDate(replacement.lessonDate)}\n\nЗаменяет: ${target.fullName}.`,
-      },
-    })
-  }
-  await db.mailLog.create({
-    data: {
-      toEmail: target.email,
-      toName: target.fullName,
-      type: 'REPLACEMENT_ASSIGNED',
-      subject: `Вы назначены на замену: ${replacement.discipline}`,
-      body: `Здравствуйте, ${target.fullName}!\n\nЗаведующий кафедрой назначил вас на замену:\n${replacement.discipline} (${replacement.kind}), группа ${replacement.groupId}\nДата: ${fmtDate(replacement.lessonDate)}, ${replacement.pairNumber}-я пара (${t.start}–${t.end}), ауд. ${replacement.room ?? '—'}\n\nЗанятие автоматически добавлено в ваш журнал работ.`,
-    },
-  })
-
+  if ('error' in outcome) return NextResponse.json({ error: outcome.error }, { status: outcome.status })
   return NextResponse.json({ ok: true })
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { sql } from '@/lib/db'
 import { getSessionUser } from '@/lib/server/auth'
 
 // Отметка исполнения поручения преподавателем
@@ -14,19 +14,26 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const assignmentId = Number(id)
   if (!Number.isInteger(assignmentId)) return NextResponse.json({ error: 'Некорректный id' }, { status: 400 })
 
-  const assignment = await db.assignment.findUnique({
-    where: { id: assignmentId },
-    include: { statuses: true },
+  const assignment = await sql`select id from "Assignment" where id = ${assignmentId}`
+  if (assignment.length === 0) return NextResponse.json({ error: 'Поручение не найдено' }, { status: 404 })
+
+  const my = await sql<{ id: number }[]>`
+    select id from "AssignmentStatus"
+    where "assignmentId" = ${assignmentId} and "teacherId" = ${me.id}
+    limit 1
+  `
+  if (my.length === 0) return NextResponse.json({ error: 'Это поручение вам не адресовано' }, { status: 403 })
+
+  const updated = await sql<{ completed: boolean; completedAt: Date | null }[]>`
+    update "AssignmentStatus"
+    set completed = true, "completedAt" = now()
+    where id = ${my[0].id}
+    returning completed, "completedAt"
+  `
+  const row = updated[0]
+
+  return NextResponse.json({
+    completed: row.completed,
+    completedAt: row.completedAt ? row.completedAt.toISOString() : null,
   })
-  if (!assignment) return NextResponse.json({ error: 'Поручение не найдено' }, { status: 404 })
-
-  const my = assignment.statuses.find((s) => s.teacherId === me.id)
-  if (!my) return NextResponse.json({ error: 'Это поручение вам не адресовано' }, { status: 403 })
-
-  const updated = await db.assignmentStatus.update({
-    where: { id: my.id },
-    data: { completed: true, completedAt: new Date() },
-  })
-
-  return NextResponse.json({ completed: updated.completed, completedAt: updated.completedAt?.toISOString() ?? null })
 }

@@ -1,25 +1,10 @@
 // Демо-данные: кафедра «Производственный менеджмент» (ПМН-204) СГТУ им. Гагарина Ю.А.
-// Запуск: bun scripts/seed.mjs  (или: node scripts/seed.mjs)
-import { PrismaClient } from '@prisma/client'
+// Запуск: node scripts/seed.mjs  (или: npm run db:seed)
+import postgres from 'postgres'
 import { randomBytes, scryptSync } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { loadEnv } from './env.mjs'
 
-// Загружаем DATABASE_URL из .env.local/.env, если он не задан (PrismaClient не читает .env сам)
-if (!process.env.DATABASE_URL) {
-  for (const file of ['../.env.local', '../.env']) {
-    try {
-      const env = readFileSync(new URL(file, import.meta.url), 'utf8')
-      const m = env.match(/^\s*DATABASE_URL\s*=\s*(.+?)\s*$/m)
-      if (m) {
-        // в .env значение может быть в кавычках — Prisma их не понимает
-        process.env.DATABASE_URL = m[1].replace(/^["']|["']$/g, '')
-        break
-      }
-    } catch {}
-  }
-}
-
-const db = new PrismaClient()
+const sql = postgres(loadEnv(), { max: 4, prepare: false, onnotice: () => {} })
 
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex')
@@ -100,27 +85,30 @@ const hoursAgo = (h) => new Date(Date.now() - h * 3600 * 1000)
 
 async function main() {
   console.log('Очистка базы...')
-  await db.mailLog.deleteMany()
-  await db.replacementRequest.deleteMany()
-  await db.replacement.deleteMany()
-  await db.work.deleteMany()
-  await db.assignmentStatus.deleteMany()
-  await db.assignment.deleteMany()
-  await db.session.deleteMany()
-  await db.scheduleEntry.deleteMany()
-  await db.settings.deleteMany()
-  await db.user.deleteMany()
+  await sql`
+    truncate table "MailLog", "ReplacementRequest", "Replacement", "Work",
+                   "AssignmentStatus", "Assignment", "Session", "ScheduleEntry",
+                   "Settings", "User"
+    restart identity cascade
+  `
 
-  await db.settings.create({ data: { id: 1, deepseekApiKey: '' } })
+  await sql`insert into "Settings" (id, "deepseekApiKey") values (1, '')`
 
   console.log('Создание пользователей...')
   const pwd = hashPassword('demo1234')
-  const head = await db.user.create({
-    data: { fullName: 'Трегубов Владимир Николаевич', email: 'tregubovvn@outlook.com', role: 'HEAD', passwordHash: pwd },
-  })
+  const [head] = await sql`
+    insert into "User" ("fullName", email, role, "passwordHash")
+    values ('Трегубов Владимир Николаевич', 'tregubovvn@outlook.com', 'HEAD', ${pwd})
+    returning *
+  `
   const teachers = []
   for (const [fullName, email] of TEACHERS) {
-    teachers.push(await db.user.create({ data: { fullName, email, role: 'TEACHER', passwordHash: pwd } }))
+    const [t] = await sql`
+      insert into "User" ("fullName", email, role, "passwordHash")
+      values (${fullName}, ${email}, 'TEACHER', ${pwd})
+      returning *
+    `
+    teachers.push(t)
   }
   const byName = Object.fromEntries(teachers.map((t) => [t.fullName, t]))
   const T = {
@@ -139,6 +127,12 @@ async function main() {
   const wd = (now.getDay() + 6) % 7
   const monday = addDays(now, -wd)
   const groupBusy = new Set()
+  const teacherEntries = []
+  const groupEntries = []
+  const addEntries = (u, date, pair, lesson, group) => {
+    teacherEntries.push(['TEACHER', String(u.id), date, pair, lesson.discipline, lesson.kind, group, lesson.room, null])
+    groupEntries.push(['GROUP', group, date, pair, lesson.discipline, lesson.kind, group, lesson.room, u.fullName])
+  }
 
   const allUsers = [head, ...teachers]
   for (const u of allUsers) {
@@ -176,12 +170,7 @@ async function main() {
             room: pick(ROOMS),
           }
           myEntries.push({ date, pairNumber: pair, ...lesson })
-          await db.scheduleEntry.create({
-            data: { ownerType: 'TEACHER', ownerId: String(u.id), date, pairNumber: pair, groupId: group, ...lesson },
-          })
-          await db.scheduleEntry.create({
-            data: { ownerType: 'GROUP', ownerId: group, date, pairNumber: pair, groupId: group, ...lesson, teacherName: u.fullName },
-          })
+          addEntries(u, date, pair, lesson, group)
         }
       }
     }
@@ -201,44 +190,51 @@ async function main() {
         groupBusy.add(`${group}|${date}|${pair}`)
         const lesson = { discipline: pick(DISCIPLINES), kind: pick(KINDS), groupId: group, room: pick(ROOMS) }
         myEntries.push({ date, pairNumber: pair, ...lesson })
-        await db.scheduleEntry.create({
-          data: { ownerType: 'TEACHER', ownerId: String(u.id), date, pairNumber: pair, groupId: group, ...lesson },
-        })
-        await db.scheduleEntry.create({
-          data: { ownerType: 'GROUP', ownerId: group, date, pairNumber: pair, groupId: group, ...lesson, teacherName: u.fullName },
-        })
+        addEntries(u, date, pair, lesson, group)
       }
     }
   }
 
+  if (teacherEntries.length > 0) {
+    await sql`
+      insert into "ScheduleEntry" ("ownerType", "ownerId", date, "pairNumber", discipline, kind, "groupId", room, "teacherName")
+      values ${sql(teacherEntries)}
+    `
+  }
+  if (groupEntries.length > 0) {
+    await sql`
+      insert into "ScheduleEntry" ("ownerType", "ownerId", date, "pairNumber", discipline, kind, "groupId", room, "teacherName")
+      values ${sql(groupEntries)}
+    `
+  }
+
   console.log('Создание поручений...')
   async function createAssignment({ description, dueDate, forAll, recipients, completedNames, createdHoursAgo }) {
-    const a = await db.assignment.create({
-      data: {
-        description,
-        dueDate,
-        forAll,
-        createdBy: head.id,
-        statuses: {
-          create: recipients.map((t) => ({
-            teacherId: t.id,
-            completed: completedNames.includes(t.fullName),
-            completedAt: completedNames.includes(t.fullName) ? hoursAgo(24 + Math.floor(rng() * 96)) : null,
-          })),
-        },
-      },
+    const [a] = await sql`
+      insert into "Assignment" (description, "dueDate", "forAll", "createdBy", "createdAt")
+      values (${description}, ${dueDate}, ${forAll}, ${head.id}, ${hoursAgo(createdHoursAgo)})
+      returning *
+    `
+    const statusRows = recipients.map((t) => {
+      const done = completedNames.includes(t.fullName)
+      return [a.id, t.id, done, done ? hoursAgo(24 + Math.floor(rng() * 96)) : null]
     })
+    await sql`
+      insert into "AssignmentStatus" ("assignmentId", "teacherId", completed, "completedAt")
+      values ${sql(statusRows)}
+    `
     for (const t of recipients) {
-      await db.mailLog.create({
-        data: {
-          toEmail: t.email,
-          toName: t.fullName,
-          type: 'ASSIGNMENT_NEW',
-          subject: 'Новое поручение',
-          body: `Здравствуйте, ${t.fullName}!\n\nВам назначено новое поручение:\n«${description}»\n\nСрок выполнения: ${dueDate}.`,
-          createdAt: hoursAgo(createdHoursAgo),
-        },
-      })
+      await sql`
+        insert into "MailLog" ("toEmail", "toName", type, subject, body, "createdAt")
+        values (
+          ${t.email},
+          ${t.fullName},
+          'ASSIGNMENT_NEW',
+          'Новое поручение',
+          ${`Здравствуйте, ${t.fullName}!\n\nВам назначено новое поручение:\n«${description}»\n\nСрок выполнения: ${dueDate}.`},
+          ${hoursAgo(createdHoursAgo)}
+        )
+      `
     }
     return a
   }
@@ -288,17 +284,21 @@ async function main() {
   console.log('Создание замен...')
   // Слот для демо-замены: занятие инициатора в будущем, где кандидат свободен
   async function findSlot(initiatorId, mustFreeIds) {
-    const entries = await db.scheduleEntry.findMany({
-      where: { ownerType: 'TEACHER', ownerId: String(initiatorId), date: { gte: tomorrow } },
-      orderBy: [{ date: 'asc' }, { pairNumber: 'asc' }],
-    })
+    const entries = await sql`
+      select * from "ScheduleEntry"
+      where "ownerType" = 'TEACHER' and "ownerId" = ${String(initiatorId)} and date >= ${tomorrow}
+      order by date asc, "pairNumber" asc
+    `
     for (const e of entries) {
       let ok = true
       for (const cid of mustFreeIds) {
-        const busy = await db.scheduleEntry.findFirst({
-          where: { ownerType: 'TEACHER', ownerId: String(cid), date: e.date, pairNumber: e.pairNumber },
-        })
-        if (busy) {
+        const busy = await sql`
+          select 1 from "ScheduleEntry"
+          where "ownerType" = 'TEACHER' and "ownerId" = ${String(cid)}
+            and date = ${e.date} and "pairNumber" = ${e.pairNumber}
+          limit 1
+        `
+        if (busy.length > 0) {
           ok = false
           break
         }
@@ -312,59 +312,57 @@ async function main() {
   const slot1 = await findSlot(T.uchuvatkin.id, [T.grimashevich.id])
   if (slot1) {
     const [start, end] = PAIR_TIMES[slot1.pairNumber]
-    const r1 = await db.replacement.create({
-      data: {
-        discipline: slot1.discipline,
-        groupId: slot1.groupId,
-        kind: slot1.kind,
-        room: slot1.room,
-        lessonDate: slot1.date,
-        pairNumber: slot1.pairNumber,
-        initiatorId: T.uchuvatkin.id,
-        substituteId: T.grimashevich.id,
-        status: 'FOUND',
-        createdAt: hoursAgo(20),
-        requests: {
-          create: [
-            { teacherId: T.grimashevich.id, status: 'ACCEPTED', createdAt: hoursAgo(20) },
-            { teacherId: T.umanskij.id, status: 'CANCELLED', createdAt: hoursAgo(20) },
-            { teacherId: T.makarova.id, status: 'CANCELLED', createdAt: hoursAgo(20) },
-          ],
-        },
-      },
-    })
-    await db.work.create({
-      data: {
-        userId: T.grimashevich.id,
-        date: slot1.date,
-        type: 'TEACHING',
-        description: `Замена: ${slot1.discipline} (${slot1.kind}), группа ${slot1.groupId}, ${slot1.date.split('-').reverse().join('.')}, ${start}–${end}`,
-        replacementId: r1.id,
-        autoGenerated: true,
-      },
-    })
+    const [r1] = await sql`
+      insert into "Replacement" (discipline, "groupId", kind, room, "lessonDate", "pairNumber", "initiatorId", "substituteId", status, "createdAt")
+      values (
+        ${slot1.discipline}, ${slot1.groupId}, ${slot1.kind}, ${slot1.room}, ${slot1.date}, ${slot1.pairNumber},
+        ${T.uchuvatkin.id}, ${T.grimashevich.id}, 'FOUND', ${hoursAgo(20)}
+      )
+      returning *
+    `
+    await sql`
+      insert into "ReplacementRequest" ("replacementId", "teacherId", status, "createdAt")
+      values ${sql([
+        [r1.id, T.grimashevich.id, 'ACCEPTED', hoursAgo(20)],
+        [r1.id, T.umanskij.id, 'CANCELLED', hoursAgo(20)],
+        [r1.id, T.makarova.id, 'CANCELLED', hoursAgo(20)],
+      ])}
+    `
+    await sql`
+      insert into "Work" ("userId", date, type, description, "replacementId", "autoGenerated")
+      values (
+        ${T.grimashevich.id},
+        ${slot1.date},
+        'TEACHING',
+        ${`Замена: ${slot1.discipline} (${slot1.kind}), группа ${slot1.groupId}, ${slot1.date.split('-').reverse().join('.')}, ${start}–${end}`},
+        ${r1.id},
+        true
+      )
+    `
     for (const t of [T.grimashevich, T.umanskij, T.makarova]) {
-      await db.mailLog.create({
-        data: {
-          toEmail: t.email,
-          toName: t.fullName,
-          type: 'REPLACEMENT_REQUEST',
-          subject: `Просьба о замене: ${slot1.discipline}`,
-          body: `Здравствуйте, ${t.fullName}!\n\n${T.uchuvatkin.fullName} просит заменить занятие:\n${slot1.discipline} (${slot1.kind}), группа ${slot1.groupId}\nДата: ${slot1.date}, ${slot1.pairNumber}-я пара (${start}–${end}), ауд. ${slot1.room}.`,
-          createdAt: hoursAgo(20),
-        },
-      })
+      await sql`
+        insert into "MailLog" ("toEmail", "toName", type, subject, body, "createdAt")
+        values (
+          ${t.email},
+          ${t.fullName},
+          'REPLACEMENT_REQUEST',
+          ${`Просьба о замене: ${slot1.discipline}`},
+          ${`Здравствуйте, ${t.fullName}!\n\n${T.uchuvatkin.fullName} просит заменить занятие:\n${slot1.discipline} (${slot1.kind}), группа ${slot1.groupId}\nДата: ${slot1.date}, ${slot1.pairNumber}-я пара (${start}–${end}), ауд. ${slot1.room}.`},
+          ${hoursAgo(20)}
+        )
+      `
     }
-    await db.mailLog.create({
-      data: {
-        toEmail: T.uchuvatkin.email,
-        toName: T.uchuvatkin.fullName,
-        type: 'REPLACEMENT_FOUND',
-        subject: `Замена подобрана: ${slot1.discipline}`,
-        body: `Здравствуйте, ${T.uchuvatkin.fullName}!\n\nНа ваше занятие найдена замена:\n${slot1.discipline}, группа ${slot1.groupId}, ${slot1.date}.\n\nЗаменяет: ${T.grimashevich.fullName}.`,
-        createdAt: hoursAgo(18),
-      },
-    })
+    await sql`
+      insert into "MailLog" ("toEmail", "toName", type, subject, body, "createdAt")
+      values (
+        ${T.uchuvatkin.email},
+        ${T.uchuvatkin.fullName},
+        'REPLACEMENT_FOUND',
+        ${`Замена подобрана: ${slot1.discipline}`},
+        ${`Здравствуйте, ${T.uchuvatkin.fullName}!\n\nНа ваше занятие найдена замена:\n${slot1.discipline}, группа ${slot1.groupId}, ${slot1.date}.\n\nЗаменяет: ${T.grimashevich.fullName}.`},
+        ${hoursAgo(18)}
+      )
+    `
   } else {
     console.warn('Не найден слот для R1')
   }
@@ -373,36 +371,33 @@ async function main() {
   const slot2 = await findSlot(T.lysikova.id, [T.umanskij.id, T.makarova.id])
   if (slot2) {
     const [start, end] = PAIR_TIMES[slot2.pairNumber]
-    await db.replacement.create({
-      data: {
-        discipline: slot2.discipline,
-        groupId: slot2.groupId,
-        kind: slot2.kind,
-        room: slot2.room,
-        lessonDate: slot2.date,
-        pairNumber: slot2.pairNumber,
-        initiatorId: T.lysikova.id,
-        status: 'SEARCHING',
-        createdAt: hoursAgo(5),
-        requests: {
-          create: [
-            { teacherId: T.umanskij.id, status: 'PENDING', createdAt: hoursAgo(5) },
-            { teacherId: T.makarova.id, status: 'PENDING', createdAt: hoursAgo(5) },
-          ],
-        },
-      },
-    })
+    const [r2] = await sql`
+      insert into "Replacement" (discipline, "groupId", kind, room, "lessonDate", "pairNumber", "initiatorId", status, "createdAt")
+      values (
+        ${slot2.discipline}, ${slot2.groupId}, ${slot2.kind}, ${slot2.room}, ${slot2.date}, ${slot2.pairNumber},
+        ${T.lysikova.id}, 'SEARCHING', ${hoursAgo(5)}
+      )
+      returning *
+    `
+    await sql`
+      insert into "ReplacementRequest" ("replacementId", "teacherId", status, "createdAt")
+      values ${sql([
+        [r2.id, T.umanskij.id, 'PENDING', hoursAgo(5)],
+        [r2.id, T.makarova.id, 'PENDING', hoursAgo(5)],
+      ])}
+    `
     for (const t of [T.umanskij, T.makarova]) {
-      await db.mailLog.create({
-        data: {
-          toEmail: t.email,
-          toName: t.fullName,
-          type: 'REPLACEMENT_REQUEST',
-          subject: `Просьба о замене: ${slot2.discipline}`,
-          body: `Здравствуйте, ${t.fullName}!\n\n${T.lysikova.fullName} просит заменить занятие:\n${slot2.discipline} (${slot2.kind}), группа ${slot2.groupId}\nДата: ${slot2.date}, ${slot2.pairNumber}-я пара (${start}–${end}), ауд. ${slot2.room}.`,
-          createdAt: hoursAgo(5),
-        },
-      })
+      await sql`
+        insert into "MailLog" ("toEmail", "toName", type, subject, body, "createdAt")
+        values (
+          ${t.email},
+          ${t.fullName},
+          'REPLACEMENT_REQUEST',
+          ${`Просьба о замене: ${slot2.discipline}`},
+          ${`Здравствуйте, ${t.fullName}!\n\n${T.lysikova.fullName} просит заменить занятие:\n${slot2.discipline} (${slot2.kind}), группа ${slot2.groupId}\nДата: ${slot2.date}, ${slot2.pairNumber}-я пара (${start}–${end}), ауд. ${slot2.room}.`},
+          ${hoursAgo(5)}
+        )
+      `
     }
   } else {
     console.warn('Не найден слот для R2')
@@ -426,26 +421,28 @@ async function main() {
     [T.goryacheva, -8, 'RESEARCH', 'Руководство выпускной квалификационной работой магистранта'],
   ]
   for (const [u, shift, type, description, newsUrl] of worksData) {
-    await db.work.create({
-      data: { userId: u.id, date: dayShift(shift), type, description, newsUrl: newsUrl ?? null },
-    })
+    await sql`
+      insert into "Work" ("userId", date, type, description, "newsUrl")
+      values (${u.id}, ${dayShift(shift)}, ${type}, ${description}, ${newsUrl ?? null})
+    `
   }
 
-  const [users, entries, assignments, replacements, works, mails] = await Promise.all([
-    db.user.count(),
-    db.scheduleEntry.count(),
-    db.assignment.count(),
-    db.replacement.count(),
-    db.work.count(),
-    db.mailLog.count(),
-  ])
+  const [counts] = await sql`
+    select
+      (select count(*)::int from "User") as users,
+      (select count(*)::int from "ScheduleEntry") as entries,
+      (select count(*)::int from "Assignment") as assignments,
+      (select count(*)::int from "Replacement") as replacements,
+      (select count(*)::int from "Work") as works,
+      (select count(*)::int from "MailLog") as mails
+  `
   console.log('Готово.')
-  console.log(`  Пользователей: ${users} (1 заведующий + ${teachers.length} преподавателей)`)
-  console.log(`  Записей расписания: ${entries}`)
-  console.log(`  Поручений: ${assignments}`)
-  console.log(`  Замен: ${replacements}`)
-  console.log(`  Работ в журнале: ${works}`)
-  console.log(`  Писем в журнале: ${mails}`)
+  console.log(`  Пользователей: ${counts.users} (1 заведующий + ${teachers.length} преподавателей)`)
+  console.log(`  Записей расписания: ${counts.entries}`)
+  console.log(`  Поручений: ${counts.assignments}`)
+  console.log(`  Замен: ${counts.replacements}`)
+  console.log(`  Работ в журнале: ${counts.works}`)
+  console.log(`  Писем в журнале: ${counts.mails}`)
   console.log('\nДемо-доступ (пароль у всех: demo1234):')
   console.log('  Заведующий: tregubovvn@outlook.com')
   console.log(`  Преподаватели: ${teachers[0].email}, ${teachers[1].email}, ...`)
@@ -456,4 +453,4 @@ main()
     console.error(e)
     process.exitCode = 1
   })
-  .finally(() => db.$disconnect())
+  .finally(() => sql.end())
