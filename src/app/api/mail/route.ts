@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { sql } from '@/lib/db'
 import { getSessionUser } from '@/lib/server/auth'
 import { todayStr } from '@/lib/schedule'
 
@@ -9,7 +9,21 @@ export async function GET(req: Request) {
   if (!me) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 })
   if (me.role !== 'HEAD') return NextResponse.json({ error: 'Доступно только заведующему' }, { status: 403 })
 
-  const items = await db.mailLog.findMany({ orderBy: { id: 'desc' }, take: 300 })
+  const items = await sql<{
+    id: number
+    toEmail: string
+    toName: string
+    type: string
+    subject: string
+    body: string
+    createdAt: Date
+  }[]>`
+    select id, "toEmail", "toName", type, subject, body, "createdAt"
+    from "MailLog"
+    order by id desc
+    limit 300
+  `
+
   return NextResponse.json({
     items: items.map((m) => ({
       id: m.id,
@@ -36,26 +50,30 @@ export async function POST(req: Request) {
   }
 
   const today = todayStr()
-  const assignments = await db.assignment.findMany({
-    where: { dueDate: today },
-    include: { statuses: { include: { teacher: true } } },
-  })
+  const pending = await sql<{
+    description: string
+    email: string
+    fullName: string
+  }[]>`
+    select a.description, u.email, u."fullName"
+    from "Assignment" a
+    join "AssignmentStatus" s on s."assignmentId" = a.id
+    join "User" u on u.id = s."teacherId"
+    where a."dueDate" = ${today} and s.completed = false
+  `
 
-  let sent = 0
-  for (const a of assignments) {
-    for (const s of a.statuses) {
-      if (s.completed) continue
-      await db.mailLog.create({
-        data: {
-          toEmail: s.teacher.email,
-          toName: s.teacher.fullName,
-          type: 'ASSIGNMENT_REMINDER',
-          subject: 'Последний день: поручение',
-          body: `Здравствуйте, ${s.teacher.fullName}!\n\nСегодня последний день срока поручения:\n«${a.description}»\n\nЕсли оно уже выполнено, отметьте это в приложении «Ассистент кафедры ПМН».`,
-        },
-      })
-      sent++
-    }
+  for (const p of pending) {
+    await sql`
+      insert into "MailLog" ("toEmail", "toName", type, subject, body)
+      values (
+        ${p.email},
+        ${p.fullName},
+        'ASSIGNMENT_REMINDER',
+        'Последний день: поручение',
+        ${`Здравствуйте, ${p.fullName}!\n\nСегодня последний день срока поручения:\n«${p.description}»\n\nЕсли оно уже выполнено, отметьте это в приложении «Ассистент кафедры ПМН».`}
+      )
+    `
   }
-  return NextResponse.json({ sent })
+
+  return NextResponse.json({ sent: pending.length })
 }

@@ -1,32 +1,56 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { sql } from '@/lib/db'
 import { getSessionUser } from '@/lib/server/auth'
 import { isValidDateStr, fmtDate, pairTime } from '@/lib/schedule'
 
-function toDTO(
-  r: {
-    id: number
-    discipline: string
-    groupId: string
-    kind: string
-    room: string | null
-    lessonDate: string
-    pairNumber: number
-    initiatorId: number
-    substituteId: number | null
-    status: string
-    assignedByHead: boolean
-    createdAt: Date
-    initiator: { fullName: string }
-    substitute: { fullName: string } | null
-    requests: {
-      id: number
-      teacherId: number
-      status: string
-      teacher: { fullName: string }
-    }[]
-  }
-) {
+type ReplacementRow = {
+  id: number
+  discipline: string
+  groupId: string
+  kind: string
+  room: string | null
+  lessonDate: string
+  pairNumber: number
+  initiatorId: number
+  substituteId: number | null
+  status: string
+  assignedByHead: boolean
+  createdAt: Date
+  initiatorFullName: string
+  substituteFullName: string | null
+}
+
+type RequestRow = {
+  id: number
+  replacementId: number
+  teacherId: number
+  status: string
+  teacherFullName: string
+}
+
+// Замена + ФИО инициатора и заменяющего одним запросом
+const replacementSelect = sql`
+  select r.*,
+         i."fullName" as "initiatorFullName",
+         s."fullName" as "substituteFullName"
+  from "Replacement" r
+  join "User" i on i.id = r."initiatorId"
+  left join "User" s on s.id = r."substituteId"
+`
+
+// То же, но сразу с id просьбы — для входящих заявок преподавателя
+const incomingSelect = sql`
+  select r.*,
+         q.id as "requestId",
+         i."fullName" as "initiatorFullName",
+         s."fullName" as "substituteFullName"
+  from "Replacement" r
+  join "User" i on i.id = r."initiatorId"
+  left join "User" s on s.id = r."substituteId"
+  join "ReplacementRequest" q on q."replacementId" = r.id
+`
+
+function toDTO(r: ReplacementRow, requests: RequestRow[]) {
   return {
     id: r.id,
     discipline: r.discipline,
@@ -36,28 +60,41 @@ function toDTO(
     lessonDate: r.lessonDate,
     pairNumber: r.pairNumber,
     initiatorId: r.initiatorId,
-    initiatorFullName: r.initiator.fullName,
+    initiatorFullName: r.initiatorFullName,
     substituteId: r.substituteId,
-    substituteFullName: r.substitute?.fullName ?? null,
+    substituteFullName: r.substituteFullName,
     status: r.status,
     assignedByHead: r.assignedByHead,
     createdAt: r.createdAt.toISOString(),
-    requests: r.requests.map((q) => ({
+    requests: requests.map((q) => ({
       id: q.id,
       teacherId: q.teacherId,
-      teacherFullName: q.teacher.fullName,
+      teacherFullName: q.teacherFullName,
       status: q.status,
     })),
   }
 }
 
-const include = {
-  initiator: { select: { fullName: true } },
-  substitute: { select: { fullName: true } },
-  requests: {
-    include: { teacher: { select: { fullName: true } } },
-    orderBy: { id: 'asc' as const },
-  },
+// Просьбы по набору замен
+async function loadRequests(replacementIds: number[]): Promise<RequestRow[]> {
+  if (replacementIds.length === 0) return []
+  return sql<RequestRow[]>`
+    select q.id, q."replacementId", q."teacherId", q.status, u."fullName" as "teacherFullName"
+    from "ReplacementRequest" q
+    join "User" u on u.id = q."teacherId"
+    where q."replacementId" in ${sql(replacementIds)}
+    order by q.id asc
+  `
+}
+
+function groupByReplacement(rows: RequestRow[]): Map<number, RequestRow[]> {
+  const map = new Map<number, RequestRow[]>()
+  for (const r of rows) {
+    const bucket = map.get(r.replacementId)
+    if (bucket) bucket.push(r)
+    else map.set(r.replacementId, [r])
+  }
+  return map
 }
 
 // Замены: преподавателю — свои и входящие просьбы, заведующему — все
@@ -66,29 +103,38 @@ export async function GET(req: Request) {
   if (!me) return NextResponse.json({ error: 'Не авторизован' }, { status: 401 })
 
   if (me.role === 'HEAD') {
-    const list = await db.replacement.findMany({
-      where: { status: { not: 'CANCELLED' } },
-      include,
-      orderBy: [{ lessonDate: 'asc' }, { pairNumber: 'asc' }],
+    const list = await sql<ReplacementRow[]>`
+      ${replacementSelect}
+      where r.status <> 'CANCELLED'
+      order by r."lessonDate" asc, r."pairNumber" asc
+    `
+    const requests = groupByReplacement(await loadRequests(list.map((r) => r.id)))
+    return NextResponse.json({
+      replacements: list.map((r) => toDTO(r, requests.get(r.id) ?? [])),
     })
-    return NextResponse.json({ replacements: list.map(toDTO) })
   }
 
-  const mine = await db.replacement.findMany({
-    where: { initiatorId: me.id, status: { not: 'CANCELLED' } },
-    include,
-    orderBy: [{ lessonDate: 'asc' }, { pairNumber: 'asc' }],
-  })
+  const mine = await sql<ReplacementRow[]>`
+    ${replacementSelect}
+    where r."initiatorId" = ${me.id} and r.status <> 'CANCELLED'
+    order by r."lessonDate" asc, r."pairNumber" asc
+  `
 
-  const incomingRows = await db.replacementRequest.findMany({
-    where: { teacherId: me.id, status: 'PENDING', replacement: { status: 'SEARCHING' } },
-    include: { replacement: { include } },
-    orderBy: { id: 'asc' },
-  })
+  const incomingRows = await sql<(ReplacementRow & { requestId: number })[]>`
+    ${incomingSelect}
+    where q."teacherId" = ${me.id} and q.status = 'PENDING' and r.status = 'SEARCHING'
+    order by q.id asc
+  `
+
+  const ids = [...new Set([...mine.map((r) => r.id), ...incomingRows.map((r) => r.id)])]
+  const requests = groupByReplacement(await loadRequests(ids))
 
   return NextResponse.json({
-    mine: mine.map(toDTO),
-    incoming: incomingRows.map((q) => ({ requestId: q.id, replacement: toDTO(q.replacement) })),
+    mine: mine.map((r) => toDTO(r, requests.get(r.id) ?? [])),
+    incoming: incomingRows.map((r) => ({
+      requestId: r.requestId,
+      replacement: toDTO(r, requests.get(r.id) ?? []),
+    })),
   })
 }
 
@@ -113,54 +159,71 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Выберите хотя бы одного кандидата' }, { status: 400 })
   }
 
-  const lesson = await db.scheduleEntry.findFirst({
-    where: { ownerType: 'TEACHER', ownerId: String(me.id), date, pairNumber },
-  })
+  const lessonRows = await sql<{
+    discipline: string
+    groupId: string
+    kind: string
+    room: string | null
+  }[]>`
+    select discipline, "groupId", kind, room
+    from "ScheduleEntry"
+    where "ownerType" = 'TEACHER' and "ownerId" = ${String(me.id)} and date = ${date} and "pairNumber" = ${pairNumber}
+    limit 1
+  `
+  const lesson = lessonRows[0]
   if (!lesson) {
     return NextResponse.json({ error: 'Занятие не найдено в вашем расписании' }, { status: 400 })
   }
 
-  const active = await db.replacement.findFirst({
-    where: { initiatorId: me.id, lessonDate: date, pairNumber, status: { not: 'CANCELLED' } },
-  })
-  if (active) {
+  const active = await sql`
+    select 1 from "Replacement"
+    where "initiatorId" = ${me.id} and "lessonDate" = ${date} and "pairNumber" = ${pairNumber}
+      and status <> 'CANCELLED'
+    limit 1
+  `
+  if (active.length > 0) {
     return NextResponse.json({ error: 'Для этого занятия уже создан поиск замены' }, { status: 400 })
   }
 
-  const candidates = await db.user.findMany({
-    where: { id: { in: candidateIds.filter((n) => n !== me.id) } },
-    select: { id: true, email: true, fullName: true },
-  })
+  const candidates = await sql<{ id: number; email: string; fullName: string }[]>`
+    select id, email, "fullName"
+    from "User"
+    where id in ${sql(candidateIds.filter((n) => n !== me.id))}
+  `
   if (candidates.length === 0) {
     return NextResponse.json({ error: 'Кандидаты не выбраны' }, { status: 400 })
   }
 
-  const replacement = await db.replacement.create({
-    data: {
-      discipline: lesson.discipline,
-      groupId: lesson.groupId,
-      kind: lesson.kind,
-      room: lesson.room,
-      lessonDate: date,
-      pairNumber,
-      initiatorId: me.id,
-      requests: { create: candidates.map((c) => ({ teacherId: c.id })) },
-    },
-    include,
+  const replacementId = await sql.begin(async (tx) => {
+    const rows = await tx<{ id: number }[]>`
+      insert into "Replacement" (discipline, "groupId", kind, room, "lessonDate", "pairNumber", "initiatorId")
+      values (${lesson.discipline}, ${lesson.groupId}, ${lesson.kind}, ${lesson.room}, ${date}, ${pairNumber}, ${me.id})
+      returning id
+    `
+    const id = rows[0].id
+    await tx`
+      insert into "ReplacementRequest" ("replacementId", "teacherId")
+      values ${tx(candidates.map((c) => [id, c.id]))}
+    `
+    return id
   })
 
   const t = pairTime(pairNumber)
   for (const c of candidates) {
-    await db.mailLog.create({
-      data: {
-        toEmail: c.email,
-        toName: c.fullName,
-        type: 'REPLACEMENT_REQUEST',
-        subject: `Просьба о замене: ${lesson.discipline} (${fmtDate(date)})`,
-        body: `Здравствуйте, ${c.fullName}!\n\n${me.fullName} просит заменить занятие:\n${lesson.discipline} (${lesson.kind}), группа ${lesson.groupId}\nДата: ${fmtDate(date)}, ${pairNumber}-я пара (${t.start}–${t.end}), ауд. ${lesson.room ?? '—'}\n\nОтветить можно в приложении «Ассистент кафедры ПМН».`,
-      },
-    })
+    await sql`
+      insert into "MailLog" ("toEmail", "toName", type, subject, body)
+      values (
+        ${c.email},
+        ${c.fullName},
+        'REPLACEMENT_REQUEST',
+        ${`Просьба о замене: ${lesson.discipline} (${fmtDate(date)})`},
+        ${`Здравствуйте, ${c.fullName}!\n\n${me.fullName} просит заменить занятие:\n${lesson.discipline} (${lesson.kind}), группа ${lesson.groupId}\nДата: ${fmtDate(date)}, ${pairNumber}-я пара (${t.start}–${t.end}), ауд. ${lesson.room ?? '—'}\n\nОтветить можно в приложении «Ассистент кафедры ПМН».`}
+      )
+    `
   }
 
-  return NextResponse.json({ replacement: toDTO(replacement) })
+  const created = await sql<ReplacementRow[]>`${replacementSelect} where r.id = ${replacementId}`
+  const requests = await loadRequests([replacementId])
+
+  return NextResponse.json({ replacement: toDTO(created[0], requests) })
 }

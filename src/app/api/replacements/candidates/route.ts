@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { sql } from '@/lib/db'
 import { getSessionUser } from '@/lib/server/auth'
 import { isValidDateStr } from '@/lib/schedule'
 
@@ -15,21 +15,33 @@ export async function GET(req: Request) {
   if (!isValidDateStr(date)) return NextResponse.json({ error: 'Некорректная дата' }, { status: 400 })
   if (!(pair >= 1 && pair <= 5)) return NextResponse.json({ error: 'Некорректная пара' }, { status: 400 })
 
-  const users = await db.user.findMany({
-    where: { id: { not: me.id } },
-    select: { id: true, fullName: true, role: true },
-    orderBy: { fullName: 'asc' },
-  })
+  const users = await sql<{ id: number; fullName: string; role: string }[]>`
+    select id, "fullName", role
+    from "User"
+    where id <> ${me.id}
+    order by "fullName" asc
+  `
 
   // Занятость кандидатов в этот день
-  const dayEntries = await db.scheduleEntry.findMany({
-    where: { ownerType: 'TEACHER', date },
-    select: { ownerId: true, pairNumber: true, discipline: true, groupId: true },
-  })
-  const foundReplacements = await db.replacement.findMany({
-    where: { lessonDate: date, status: 'FOUND' },
-    select: { initiatorId: true, substituteId: true, pairNumber: true },
-  })
+  const dayEntries = await sql<{
+    ownerId: string
+    pairNumber: number
+    discipline: string
+    groupId: string
+  }[]>`
+    select "ownerId", "pairNumber", discipline, "groupId"
+    from "ScheduleEntry"
+    where "ownerType" = 'TEACHER' and date = ${date}
+  `
+  const foundReplacements = await sql<{
+    initiatorId: number
+    substituteId: number | null
+    pairNumber: number
+  }[]>`
+    select "initiatorId", "substituteId", "pairNumber"
+    from "Replacement"
+    where "lessonDate" = ${date} and status = 'FOUND'
+  `
 
   const baseByUser = new Map<number, { pairNumber: number; discipline: string; groupId: string }[]>()
   for (const e of dayEntries) {

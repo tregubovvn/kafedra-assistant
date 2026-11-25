@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { sql } from '@/lib/db'
 import { getSessionUser } from '@/lib/server/auth'
 import { isValidDateStr, pairTime } from '@/lib/schedule'
 
@@ -12,11 +12,11 @@ export async function GET(req: Request) {
 
   // Список групп кафедры (для выбора в клиенте заведующего)
   if (url.searchParams.get('list') === 'groups') {
-    const rows = await db.scheduleEntry.findMany({
-      where: { ownerType: 'GROUP' },
-      distinct: ['ownerId'],
-      select: { ownerId: true },
-    })
+    const rows = await sql<{ ownerId: string }[]>`
+      select distinct "ownerId"
+      from "ScheduleEntry"
+      where "ownerType" = 'GROUP'
+    `
     return NextResponse.json({ groups: rows.map((r) => r.ownerId).sort() })
   }
 
@@ -51,14 +51,29 @@ export async function GET(req: Request) {
 
   if (mode === 'teacher') {
     const teacherId = Number(id)
-    const base = await db.scheduleEntry.findMany({
-      where: { ownerType: 'TEACHER', ownerId: String(teacherId), date },
-      orderBy: { pairNumber: 'asc' },
-    })
-    const replacements = await db.replacement.findMany({
-      where: { initiatorId: teacherId, lessonDate: date, status: { not: 'CANCELLED' } },
-      include: { substitute: { select: { fullName: true } } },
-    })
+    const base = await sql<{
+      pairNumber: number
+      discipline: string
+      kind: string
+      groupId: string
+      room: string | null
+    }[]>`
+      select "pairNumber", discipline, kind, "groupId", room
+      from "ScheduleEntry"
+      where "ownerType" = 'TEACHER' and "ownerId" = ${String(teacherId)} and date = ${date}
+      order by "pairNumber" asc
+    `
+
+    const replacements = await sql<{
+      pairNumber: number
+      status: string
+      substituteFullName: string | null
+    }[]>`
+      select r."pairNumber", r.status, s."fullName" as "substituteFullName"
+      from "Replacement" r
+      left join "User" s on s.id = r."substituteId"
+      where r."initiatorId" = ${teacherId} and r."lessonDate" = ${date} and r.status <> 'CANCELLED'
+    `
 
     for (const e of base) {
       const r = replacements.find((x) => x.pairNumber === e.pairNumber)
@@ -69,16 +84,24 @@ export async function GET(req: Request) {
         kind: e.kind,
         groupId: e.groupId,
         room: e.room,
-        replacedBy: r?.status === 'FOUND' ? r.substitute?.fullName ?? '—' : null,
+        replacedBy: r?.status === 'FOUND' ? r.substituteFullName ?? '—' : null,
         searching: r?.status === 'SEARCHING',
       })
     }
 
     // Занятия, взятые как замена
-    const taken = await db.replacement.findMany({
-      where: { substituteId: teacherId, lessonDate: date, status: 'FOUND' },
-      orderBy: { pairNumber: 'asc' },
-    })
+    const taken = await sql<{
+      pairNumber: number
+      discipline: string
+      kind: string
+      groupId: string
+      room: string | null
+    }[]>`
+      select "pairNumber", discipline, kind, "groupId", room
+      from "Replacement"
+      where "substituteId" = ${teacherId} and "lessonDate" = ${date} and status = 'FOUND'
+      order by "pairNumber" asc
+    `
     for (const r of taken) {
       lessons.push({
         pairNumber: r.pairNumber,
@@ -91,17 +114,31 @@ export async function GET(req: Request) {
       })
     }
   } else {
-    const base = await db.scheduleEntry.findMany({
-      where: { ownerType: 'GROUP', ownerId: id, date },
-      orderBy: { pairNumber: 'asc' },
-    })
-    const replacements = await db.replacement.findMany({
-      where: { groupId: id, lessonDate: date, status: { not: 'CANCELLED' } },
-      include: {
-        substitute: { select: { fullName: true } },
-        initiator: { select: { fullName: true } },
-      },
-    })
+    const base = await sql<{
+      pairNumber: number
+      discipline: string
+      kind: string
+      groupId: string
+      room: string | null
+      teacherName: string | null
+    }[]>`
+      select "pairNumber", discipline, kind, "groupId", room, "teacherName"
+      from "ScheduleEntry"
+      where "ownerType" = 'GROUP' and "ownerId" = ${id} and date = ${date}
+      order by "pairNumber" asc
+    `
+
+    const replacements = await sql<{
+      pairNumber: number
+      status: string
+      substituteFullName: string | null
+    }[]>`
+      select r."pairNumber", r.status, s."fullName" as "substituteFullName"
+      from "Replacement" r
+      left join "User" s on s.id = r."substituteId"
+      where r."groupId" = ${id} and r."lessonDate" = ${date} and r.status <> 'CANCELLED'
+    `
+
     for (const e of base) {
       const r = replacements.find((x) => x.pairNumber === e.pairNumber)
       lessons.push({
@@ -112,7 +149,7 @@ export async function GET(req: Request) {
         groupId: e.groupId,
         room: e.room,
         teacherName:
-          r?.status === 'FOUND' ? `${r.substitute?.fullName ?? '—'} (замена)` : e.teacherName,
+          r?.status === 'FOUND' ? `${r.substituteFullName ?? '—'} (замена)` : e.teacherName,
         searching: r?.status === 'SEARCHING',
       })
     }

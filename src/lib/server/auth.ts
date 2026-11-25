@@ -1,7 +1,7 @@
 // Серверная авторизация: пароли (scrypt) и сессии по токену
 
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
-import { db } from '@/lib/db'
+import { sql } from '@/lib/db'
 import type { AppUser } from '@/lib/types'
 
 export function hashPassword(password: string): string {
@@ -31,12 +31,16 @@ export async function getSessionUser(req: Request): Promise<AppUser | null> {
   const auth = req.headers.get('authorization') ?? ''
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null
   if (!token) return null
-  const session = await db.session.findUnique({
-    where: { token },
-    include: { user: true },
-  })
-  if (!session) return null
-  const u = session.user
+
+  const rows = await sql<{ id: number; email: string; fullName: string; role: string }[]>`
+    select u.id, u.email, u."fullName", u.role
+    from "Session" s
+    join "User" u on u.id = s."userId"
+    where s.token = ${token}
+    limit 1
+  `
+  const u = rows[0]
+  if (!u) return null
   return { id: u.id, email: u.email, fullName: u.fullName, role: u.role as 'HEAD' | 'TEACHER' }
 }
 

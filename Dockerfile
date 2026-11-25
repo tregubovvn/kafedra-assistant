@@ -5,9 +5,6 @@
 
 FROM node:22-alpine
 
-# Prisma-движок для PostgreSQL требует libssl
-RUN apk add --no-cache openssl
-
 WORKDIR /app
 
 COPY package.json ./
@@ -16,16 +13,16 @@ RUN npm install
 COPY . .
 
 # DEPLOY_MODE=server — обычная сборка под `next start`
-RUN npx prisma generate && DEPLOY_MODE=server npm run build
+RUN DEPLOY_MODE=server npm run build
 
 ENV NODE_ENV=production \
     PORT=3000 \
     NEXT_TELEMETRY_DISABLED=1 \
     DEPLOY_MODE=server
 
-# DATABASE_URL и DIRECT_URL приходят из --env-file / docker-compose
+# DATABASE_URL приходит из --env-file / docker-compose
 EXPOSE 3000
 
 # При старте только запускаем сервер. Схему в Supabase применяем вручную:
-# `npm run db:push` (или задайте PRISMA_DB_PUSH=1 — тогда push выполнится на старте)
-CMD ["sh", "-c", "if [ \"$PRISMA_DB_PUSH\" = \"1\" ]; then npx prisma db push --skip-generate; fi; npx next start -p 3000"]
+# `npm run db:push` (или задайте DB_PUSH=1 — тогда схема применится на старте)
+CMD ["sh", "-c", "if [ \"$DB_PUSH\" = \"1\" ]; then node scripts/db-push.mjs; fi; npx next start -p 3000"]
