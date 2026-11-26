@@ -378,7 +378,7 @@ export function ScheduleTab({ userId, fullName }: { userId: number; fullName: st
       <Tabs defaultValue="dept">
         <TabsList className="w-full">
           <TabsTrigger value="dept" className="flex-1">
-            Расписание кафедры
+            Расписание
           </TabsTrigger>
           <TabsTrigger value="mine" className="flex-1">
             Мои замены
@@ -395,10 +395,15 @@ export function ScheduleTab({ userId, fullName }: { userId: number; fullName: st
   )
 }
 
-// Расписание кафедры с rasp.sstu.ru: сплошной список по всем дням от сегодня
+// ФИО сравниваем без учёта регистра и «ё»
+function sameName(a: string, b: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim()
+  return norm(a) === norm(b)
+}
+
+// Расписание преподавателя с rasp.sstu.ru: только свои занятия, сплошным списком по дням от сегодня
 function DeptSchedule({ fullName }: { fullName: string }) {
   const [lessons, setLessons] = useState<RaspLesson[] | null>(null)
-  const [onlyMine, setOnlyMine] = useState(false)
   const [reloading, setReloading] = useState(false)
   const today = todayStr()
 
@@ -408,7 +413,7 @@ function DeptSchedule({ fullName }: { fullName: string }) {
       const res = await api<{ lessons: RaspLesson[] }>('/api/rasp')
       setLessons(res.lessons)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось загрузить расписание кафедры')
+      toast.error(e instanceof Error ? e.message : 'Не удалось загрузить расписание')
       setLessons([])
     } finally {
       setReloading(false)
@@ -421,9 +426,9 @@ function DeptSchedule({ fullName }: { fullName: string }) {
 
   const visible = useMemo(() => {
     return (lessons ?? [])
-      .filter((l) => l.date >= today && (!onlyMine || l.teacherName === fullName))
-      .sort((a, b) => a.date.localeCompare(b.date) || a.pairNumber - b.pairNumber || a.teacherName.localeCompare(b.teacherName))
-  }, [lessons, today, onlyMine, fullName])
+      .filter((l) => sameName(l.teacherName, fullName) && l.date >= today)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.pairNumber - b.pairNumber)
+  }, [lessons, today, fullName])
 
   const byDate = useMemo(() => {
     const map = new Map<string, RaspLesson[]>()
@@ -438,33 +443,23 @@ function DeptSchedule({ fullName }: { fullName: string }) {
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant={onlyMine ? 'outline' : 'default'}
-            onClick={() => setOnlyMine(false)}
-          >
-            Вся кафедра
-          </Button>
-          <Button size="sm" variant={onlyMine ? 'default' : 'outline'} onClick={() => setOnlyMine(true)}>
-            Только мои
-          </Button>
+        <div>
+          <h2 className="text-base font-semibold">Моё расписание</h2>
+          <p className="text-xs text-muted-foreground">
+            Источник: rasp.sstu.ru, кафедра ПМН. Все дни с {fmtDate(today)}, только ваши занятия.
+          </p>
         </div>
         <Button size="sm" variant="outline" disabled={reloading} onClick={() => void load()}>
           {reloading ? 'Обновление…' : 'Обновить'}
         </Button>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        Источник: rasp.sstu.ru, кафедра ПМН. Показаны все дни с {fmtDate(today)}.
-      </p>
-
       {lessons === null ? (
         <Spinner label="Загрузка расписания…" />
       ) : byDate.length === 0 ? (
         <EmptyState
-          title={onlyMine ? 'Ваших занятий в расписании нет' : 'Расписание на ближайшие дни не опубликовано'}
-          hint="Данные обновляются синхронизацией с rasp.sstu.ru"
+          title="Ваших занятий в опубликованном расписании нет"
+          hint="Данные берутся с rasp.sstu.ru и обновляются синхронизацией"
         />
       ) : (
         <div className="grid gap-4">
@@ -481,9 +476,8 @@ function DeptSchedule({ fullName }: { fullName: string }) {
               </div>
               {list.map((l, i) => {
                 const t = pairTime(l.pairNumber)
-                const mine = l.teacherName === fullName
                 return (
-                  <Card key={`${date}-${l.pairNumber}-${l.teacherName}-${i}`} className={`py-0 ${mine ? 'border-primary/40' : ''}`}>
+                  <Card key={`${date}-${l.pairNumber}-${i}`} className="py-0">
                     <CardContent className="flex items-start gap-3 p-3">
                       <div className="flex w-11 shrink-0 flex-col items-center rounded-lg bg-muted py-1.5">
                         <span className="text-[10px] text-muted-foreground">пара</span>
@@ -493,14 +487,12 @@ function DeptSchedule({ fullName }: { fullName: string }) {
                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           <span>{t.start}–{t.end}</span>
                           {l.kind && <KindBadge kind={l.kind} />}
-                          {mine && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary">моё</span>}
                         </div>
                         <p className="mt-1 text-sm font-medium leading-snug">{l.discipline}</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {l.groupId ? `группа ${l.groupId}` : ''}
                           {l.room ? `${l.groupId ? ' · ' : ''}ауд. ${l.room}` : ''}
                         </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{l.teacherName}</p>
                       </div>
                     </CardContent>
                   </Card>
