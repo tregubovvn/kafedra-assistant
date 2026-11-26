@@ -1,8 +1,7 @@
 # Пример конфигурации nginx для https://tregubovvn.ru/kafedra-assistant
 #
-# Приложение — Node-сервер (next start) на 127.0.0.1:3000, nginx только проксирует подпуть.
-# Важно: сборка должна быть сделана с NEXT_PUBLIC_BASE_PATH=/kafedra-assistant,
-# иначе Next будет ждать запросы без префикса.
+# Приложение — статические файлы (Next.js export), Node на сервере не нужен.
+# Каталог сайта: /var/www/html/kafedra-assistant
 #
 # Установка:
 #   sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/tregubovvn.ru
@@ -18,19 +17,26 @@ server {
     # root /var/www/html;
     # location / { try_files $uri $uri/ =404; }
 
-    # Без слэша и со слэшем проксируются одинаково; канонический вид (/kafedra-assistant без слэша)
-    # задаёт сам Next (308), поэтому своих редиректов здесь быть не должно.
-    # proxy_pass без URI сохраняет префикс: Next получает /kafedra-assistant/... (это его basePath)
-    location /kafedra-assistant {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 60s;
-        client_max_body_size 10m;
+    # Не отдавать dotfiles (.env с паролем БД, .git и т.п.)
+    location ~ /\.(?!well-known) {
+        deny all;
+    }
+
+    # Канонический адрес без слэша: Next собирает ссылки от /kafedra-assistant
+    location = /kafedra-assistant {
+        return 301 /kafedra-assistant/;
+    }
+
+    # Статика приложения
+    location /kafedra-assistant/ {
+        root /var/www/html;
+        index index.html;
+        try_files $uri $uri/ /kafedra-assistant/index.html;
+    }
+
+    # Конфиг (anon key, общий пароль) правится на сервере — не кэшируем
+    location = /kafedra-assistant/config.js {
+        root /var/www/html;
+        add_header Cache-Control "no-store";
     }
 }
