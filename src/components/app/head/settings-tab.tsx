@@ -130,7 +130,14 @@ export function HeadSettingsTab() {
                 <TableBody>
                   {users.map((u) => (
                     <TableRow key={u.id}>
-                      <TableCell className="font-medium">{u.fullName}</TableCell>
+                      <TableCell className="font-medium">
+                        {u.fullName}
+                        {(u.position || u.degree) && (
+                          <div className="text-xs font-normal text-muted-foreground">
+                            {[u.position, u.degree].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{u.email}</TableCell>
                       <TableCell>{u.role === 'HEAD' ? 'Заведующий' : 'Преподаватель'}</TableCell>
                       <TableCell className="text-right">

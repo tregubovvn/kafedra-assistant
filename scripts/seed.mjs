@@ -45,15 +45,32 @@ const PAIR_TIMES = {
 }
 
 const TEACHERS = [
-  ['Гримашевич Ольга Николаевна', 'grimashevich@pmn.demo'],
-  ['Горячева Ирина Алексеевна', 'goryacheva@pmn.demo'],
-  ['Учуваткин Александр Александрович', 'uchuvatkin@pmn.demo'],
-  ['Уманский Вячеслав Юрьевич', 'umanskij@pmn.demo'],
-  ['Лысикова Ольга Валерьевна', 'lysikova@pmn.demo'],
-  ['Подсумкова Людмила Алексеевна', 'podsumkova@pmn.demo'],
-  ['Глушкова Юлия Олеговна', 'glushkova@pmn.demo'],
-  ['Славнецкова Людмила Владимировна', 'slavnetskova@pmn.demo'],
-  ['Макарова Светлана Николаевна', 'makarova@pmn.demo'],
+  ['Алексеева Ольга Сергеевна', 'alekseeva@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Бехер Ева Александровна', 'beher@pmn.demo', 'Ассистент', ''],
+  ['Глушкова Юлия Олеговна', 'glushkova@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Горячева Ирина Алексеевна', 'goryacheva@pmn.demo', 'Профессор', 'доктор экономических наук, доцент'],
+  ['Гримашевич Ольга Николаевна', 'grimashevich@pmn.demo', 'Профессор', 'доктор экономических наук, профессор'],
+  ['Жулина Елена Геннадиевна', 'zhulina@pmn.demo', 'Профессор', 'доктор экономических наук, доцент'],
+  ['Ипполитова Анна Александровна', 'ippolitova@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Казакова Нина Васильевна', 'kazakova@pmn.demo', 'Профессор', 'доктор экономических наук, профессор'],
+  ['Козловский Дмитрий Валентинович', 'kozlovskij@pmn.demo', 'Профессор', 'доктор филологических наук, доцент'],
+  ['Кравцов Роман Сергеевич', 'kravtsov@pmn.demo', 'Старший преподаватель', ''],
+  ['Лобов Артем Сергеевич', 'lobov@pmn.demo', 'Ассистент', ''],
+  ['Лысикова Ольга Валерьевна', 'lysikova@pmn.demo', 'Профессор', 'доктор социологических наук, доцент'],
+  ['Макаров Антон Алексеевич', 'makarov@pmn.demo', 'Ассистент', ''],
+  ['Макарова Светлана Николаевна', 'makarova@pmn.demo', 'Доцент', 'кандидат социологических наук, доцент'],
+  ['Матушкин Михаил Александрович', 'matushkin@pmn.demo', 'Профессор', 'доктор экономических наук, профессор'],
+  ['Мухина Инна Васильевна', 'muhina@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Одинцова Татьяна Николаевна', 'odintsova@pmn.demo', 'Профессор', 'доктор экономических наук, доцент'],
+  ['Подсумкова Людмила Алексеевна', 'podsumkova@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Пузанова Елена Александровна', 'puzanova@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Сарасеко Елена Сергеевна', 'saraseko@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Славнецкова Людмила Владимировна', 'slavnetskova@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Уманская Марина Викторовна', 'umanskaya@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Уманский Вячеслав Юрьевич', 'umanskij@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Учуваткин Александр Александрович', 'uchuvatkin@pmn.demo', 'Старший преподаватель', ''],
+  ['Хачатрян Гаянэ Альбертовна', 'hachatryan@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Эмих Инна Вячеславовна', 'emih@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
 ]
 
 const DISCIPLINES = [
@@ -97,15 +114,15 @@ async function main() {
   console.log('Создание пользователей...')
   const pwd = hashPassword('demo1234')
   const [head] = await sql`
-    insert into "User" ("fullName", email, role, "passwordHash")
-    values ('Трегубов Владимир Николаевич', 'tregubovvn@outlook.com', 'HEAD', ${pwd})
+    insert into "User" ("fullName", email, role, "passwordHash", position, degree)
+    values ('Трегубов Владимир Николаевич', 'tregubovvn@outlook.com', 'HEAD', ${pwd}, 'Профессор', 'доктор экономических наук, доцент')
     returning *
   `
   const teachers = []
-  for (const [fullName, email] of TEACHERS) {
+  for (const [fullName, email, position, degree] of TEACHERS) {
     const [t] = await sql`
-      insert into "User" ("fullName", email, role, "passwordHash")
-      values (${fullName}, ${email}, 'TEACHER', ${pwd})
+      insert into "User" ("fullName", email, role, "passwordHash", position, degree)
+      values (${fullName}, ${email}, 'TEACHER', ${pwd}, ${position}, ${degree})
       returning *
     `
     teachers.push(t)

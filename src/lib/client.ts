@@ -172,7 +172,7 @@ export async function api<T = unknown>(
   if (p === '/api/users' && method === 'GET') {
     requireHead()
     const users = await rest(
-      'User?select=id,email,"fullName",role,"createdAt"&order=role.desc,"fullName".asc'
+      'User?select=id,email,"fullName",role,position,degree,"createdAt"&order=role.desc,"fullName".asc'
     )
     return { users } as T
   }
@@ -191,7 +191,7 @@ export async function api<T = unknown>(
       'User',
       {
         method: 'POST',
-        body: { fullName, email, role: 'TEACHER', passwordHash: 'shared' },
+        body: { fullName, email, role: 'TEACHER', passwordHash: 'shared', position: body.position ?? '', degree: body.degree ?? '' },
         prefer: 'return=representation',
       }
     )
