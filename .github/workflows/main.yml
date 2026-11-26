@@ -1,9 +1,16 @@
-name: Deploy Static Site
+# Готовый GitHub Actions workflow.
+# Положить в .github/workflows/main.yml (правка этого пути требует токен со scope `workflow`).
+# Секреты репозитория: HOST, USERNAME, SSH_PRIVATE_KEY.
+#
+# Сборка НЕ выполняется: в репозитории уже лежит готовая статика в site/
+# (обновляется локально: npm run build:static && npm run publish:static).
+
+name: Deploy kafedra-assistant
 
 on:
   push:
     branches:
-      - main # Ваша основная ветка
+      - main
 
 jobs:
   deploy:
@@ -11,14 +18,14 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4.2.2 # Обновленная версия, без предупреждений о Node.js
+        uses: actions/checkout@v4.2.2
 
-      - name: Copy files via SSH
-        uses: appleboy/scp-action@v0.1.7 # Специальный экшен для копирования файлов
+      - name: Copy static site via SSH
+        uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22 # Укажите ваш порт (22 или тот, что нашли в sshd_config)
-          source: "." # Копируем всё содержимое репозитория
-          target: "/var/www/html/kafedra-assistant" # Путь к папке сайта на вашем сервере
+          port: 22
+          source: "site/*"
+          target: "/var/www/html/kafedra-assistant"
