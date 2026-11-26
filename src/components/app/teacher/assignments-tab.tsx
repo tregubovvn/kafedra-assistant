@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { BadgeCheck, CalendarClock, ClipboardList } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/client'
-import { fmtDate, todayStr, urgencyOf, URGENCY_CLASS } from '@/lib/schedule'
+import { fmtDate, fmtDateTime, todayStr, urgencyOf, URGENCY_CLASS } from '@/lib/schedule'
 import type { AssignmentItem } from '@/lib/types'
 import { EmptyState, Spinner, UrgencyLegend } from '@/components/app/bits'
 import { Button } from '@/components/ui/button'
@@ -129,7 +129,7 @@ export function AssignmentsTab({ userId }: { userId: number }) {
         ) : (
           <div className="mt-2 text-xs text-muted-foreground">
             {my?.completed
-              ? `Выполнено${my.completedAt ? ` ${fmtDate(my.completedAt.slice(0, 10))}` : ''}`
+              ? `Выполнено${my.completedAt ? ` ${fmtDateTime(my.completedAt)}` : ''}`
               : 'Не выполнено в срок'}
             {my?.result ? <p className="mt-1 text-foreground">Результат: {my.result}</p> : null}
           </div>
