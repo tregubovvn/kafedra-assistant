@@ -15,7 +15,8 @@ import type { AppUser } from '@/lib/types'
 import { toast } from 'sonner'
 
 const DEMO_USERS: { email: string; name: string; role: string }[] = [
-  { email: 'tregubovvn@outlook.com', name: 'Трегубов Владимир Николаевич', role: 'Заведующий кафедрой' },
+  { email: 'slavnetskova@pmn.demo', name: 'Славнецкова Людмила Владимировна', role: 'Заведующая кафедрой' },
+  { email: 'slavnetskova.docent@pmn.demo', name: 'Славнецкова Людмила Владимировна', role: 'Доцент' },
   { email: 'grimashevich@pmn.demo', name: 'Гримашевич Ольга Николаевна', role: 'Преподаватель' },
   { email: 'goryacheva@pmn.demo', name: 'Горячева Ирина Алексеевна', role: 'Преподаватель' },
   { email: 'uchuvatkin@pmn.demo', name: 'Учуваткин Александр Александрович', role: 'Преподаватель' },
@@ -23,7 +24,7 @@ const DEMO_USERS: { email: string; name: string; role: string }[] = [
   { email: 'lysikova@pmn.demo', name: 'Лысикова Ольга Валерьевна', role: 'Преподаватель' },
   { email: 'podsumkova@pmn.demo', name: 'Подсумкова Людмила Алексеевна', role: 'Преподаватель' },
   { email: 'glushkova@pmn.demo', name: 'Глушкова Юлия Олеговна', role: 'Преподаватель' },
-  { email: 'slavnetskova@pmn.demo', name: 'Славнецкова Людмила Владимировна', role: 'Преподаватель' },
+  { email: 'tregubovvn@outlook.com', name: 'Трегубов Владимир Николаевич', role: 'Преподаватель' },
   { email: 'makarova@pmn.demo', name: 'Макарова Светлана Николаевна', role: 'Преподаватель' },
 ]
 

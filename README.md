@@ -26,8 +26,9 @@
 
 | Роль | Логин | Пароль |
 |---|---|---|
-| Заведующий | `tregubovvn@outlook.com` | общий пароль из `config.js` (`demo1234`) |
-| Преподаватели | `grimashevich@pmn.demo`, `goryacheva@pmn.demo`, … | тот же |
+| Заведующая | `slavnetskova@pmn.demo` | общий пароль из `config.js` (`demo1234`) |
+| Доцент (та же Славнецкова) | `slavnetskova.docent@pmn.demo` | тот же |
+| Преподаватели | `tregubovvn@outlook.com`, `grimashevich@pmn.demo`, … | тот же |
 
 На экране входа есть быстрый демо-выбор пользователя.
 

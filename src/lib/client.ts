@@ -494,15 +494,10 @@ export async function api<T = unknown>(
       `Replacement?${select}&"initiatorId"=eq.${me.id}&status=neq.CANCELLED`
     )
     const incomingRows = await rest<any[]>(
-      `Replacement?${select}&status=eq.SEARCHING&requests.teacherId=eq.${me.id}&requests.status=eq.PENDING`
+      `ReplacementRequest?select=id,status,replacement:Replacement!inner(*,initiator:User!Replacement_initiatorId_fkey("fullName"),substitute:User!Replacement_substituteId_fkey("fullName"),requests:ReplacementRequest(id,"teacherId",status,teacher:User("fullName")))&teacherId=eq.${me.id}&status=eq.PENDING&replacement.status=eq.SEARCHING`
     )
 
-    const incoming = incomingRows.map((r) => {
-      const request = (r.requests ?? []).find(
-        (x: any) => x.teacherId === me.id && x.status === 'PENDING'
-      )
-      return { requestId: request?.id ?? r.requests?.[0]?.id ?? 0, replacement: toDTO(r) }
-    })
+    const incoming = incomingRows.map((row) => ({ requestId: row.id, replacement: toDTO(row.replacement) }))
 
     return { mine: mine.map(toDTO), incoming } as T
   }
