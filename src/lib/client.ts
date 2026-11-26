@@ -589,7 +589,11 @@ export async function api<T = unknown>(
 
     const incoming = incomingRows.map((row) => ({ requestId: row.id, replacement: toDTO(row.replacement) }))
 
-    return { mine: mine.map(toDTO), incoming } as T
+    const substitutions = await rest<any[]>(
+      `Replacement?${select}&"substituteId"=eq.${me.id}&status=eq.FOUND`
+    )
+
+    return { mine: mine.map(toDTO), incoming, substitutions: substitutions.map(toDTO) } as T
   }
 
   if (p === '/api/replacements' && method === 'POST') {
@@ -607,7 +611,23 @@ export async function api<T = unknown>(
         String(me.id)
       )}&date=eq.${q(String(date))}&"pairNumber"=eq.${pairNumber}&limit=1`
     )
-    const lesson = lessons[0]
+    // занятие может прийти из формы (расписание с rasp.sstu.ru), иначе ищем в ScheduleEntry и RaspEntry
+    let lesson = body.discipline
+      ? {
+          discipline: String(body.discipline),
+          groupId: String(body.groupId ?? ''),
+          kind: String(body.kind ?? ''),
+          room: String(body.room ?? ''),
+        }
+      : lessons[0]
+    if (!lesson) {
+      const rasp = await rest<any[]>(
+        `RaspEntry?select=discipline,"groupId",kind,room&"teacherName"=eq.${q(
+          me.fullName
+        )}&date=eq.${q(String(date))}&"pairNumber"=eq.${pairNumber}&limit=1`
+      )
+      lesson = rasp[0]
+    }
     if (!lesson) throw new ApiError('Занятие не найдено в вашем расписании', 400)
 
     const active = await rest<any[]>(
@@ -734,8 +754,8 @@ export async function api<T = unknown>(
     if (target[0].id === r.initiatorId) throw new ApiError('Нельзя назначить самого инициатора', 400)
 
     const base = await rest<any[]>(
-      `ScheduleEntry?select=id&"ownerType"=eq.TEACHER&"ownerId"=eq.${q(
-        String(teacherId)
+      `RaspEntry?select=id&"teacherName"=eq.${q(
+        target[0].fullName
       )}&date=eq.${q(String(r.lessonDate))}&"pairNumber"=eq.${r.pairNumber}&limit=1`
     )
     if (base.length > 0) {
@@ -809,6 +829,9 @@ export async function api<T = unknown>(
     const dayEntries = await rest<{ ownerId: string; pairNumber: number; discipline: string; groupId: string }[]>(
       `ScheduleEntry?select="ownerId","pairNumber",discipline,"groupId"&"ownerType"=eq.TEACHER&date=eq.${q(date)}`
     )
+    const raspDay = await rest<{ teacherName: string; pairNumber: number; discipline: string; groupId: string }[]>(
+      `RaspEntry?select="teacherName","pairNumber",discipline,"groupId"&date=eq.${q(date)}`
+    )
     const found = await rest<{ initiatorId: number; substituteId: number | null; pairNumber: number }[]>(
       `Replacement?select="initiatorId","substituteId","pairNumber"&"lessonDate"=eq.${q(date)}&status=eq.FOUND`
     )
@@ -816,6 +839,15 @@ export async function api<T = unknown>(
     const baseByUser = new Map<number, { pairNumber: number; discipline: string; groupId: string }[]>()
     for (const e of dayEntries) {
       const uid = Number(e.ownerId)
+      if (!baseByUser.has(uid)) baseByUser.set(uid, [])
+      baseByUser.get(uid)!.push({ pairNumber: e.pairNumber, discipline: e.discipline, groupId: e.groupId })
+    }
+
+    // занятость по расписанию с rasp.sstu.ru (ФИО → id)
+    const idByName = new Map(users.map((u) => [u.fullName, u.id]))
+    for (const e of raspDay) {
+      const uid = idByName.get(e.teacherName)
+      if (!uid) continue
       if (!baseByUser.has(uid)) baseByUser.set(uid, [])
       baseByUser.get(uid)!.push({ pairNumber: e.pairNumber, discipline: e.discipline, groupId: e.groupId })
     }

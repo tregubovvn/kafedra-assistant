@@ -1,7 +1,7 @@
 'use client'
 
-// Вкладка «Расписание» преподавателя: своё расписание с заменами,
-// входящие просьбы о замене и мастер подбора замены.
+// Вкладка «Расписание» преподавателя: только свои занятия одним списком по дням от сегодня.
+// У каждого занятия — кнопка «Замена»; на карточке видны поиск замены, «Вас заменяют» и взятые замены.
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -16,77 +16,108 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { ChevronLeft, ChevronRight, SearchX, UserCheck, X } from 'lucide-react'
+import { SearchX, UserCheck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/client'
-import { addDaysStr, fmtDate, pairTime, todayStr, weekdayName } from '@/lib/schedule'
-import type { CandidateGroup, IncomingRequest, RaspLesson, ReplacementItem, ScheduleLesson } from '@/lib/types'
+import { fmtDate, pairTime, todayStr, weekdayName } from '@/lib/schedule'
+import type {
+  CandidateGroup,
+  IncomingRequest,
+  RaspLesson,
+  ReplacementItem,
+  ScheduleLesson,
+} from '@/lib/types'
 import { EmptyState, KindBadge, Spinner } from '@/components/app/bits'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-function MyReplacements({ userId }: { userId: number }) {
-  const [date, setDate] = useState(todayStr())
-  const [lessons, setLessons] = useState<ScheduleLesson[] | null>(null)
-  const [loadedKey, setLoadedKey] = useState('')
-  const [incoming, setIncoming] = useState<IncomingRequest[]>([])
-  const [wizard, setWizard] = useState<{ pair: number; lesson: ScheduleLesson } | null>(null)
+type ReplacementsResponse = {
+  mine: ReplacementItem[]
+  incoming: IncomingRequest[]
+  substitutions?: ReplacementItem[]
+}
+
+type Row = {
+  key: string
+  date: string
+  pairNumber: number
+  discipline: string
+  kind: string
+  groupId: string
+  room: string
+  own: boolean
+  searching: boolean
+  replacedBy: string | null
+  coveringFor: string | null
+}
+
+// ФИО сравниваем без учёта регистра и «ё»
+function sameName(a: string, b: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim()
+  return norm(a) === norm(b)
+}
+
+export function ScheduleTab({ userId, fullName }: { userId: number; fullName: string }) {
+  const [rasp, setRasp] = useState<RaspLesson[] | null>(null)
+  const [repl, setRepl] = useState<ReplacementsResponse | null>(null)
+  const [reloading, setReloading] = useState(false)
+  const [wizard, setWizard] = useState<{ date: string; pair: number; lesson: ScheduleLesson } | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const today = todayStr()
-  const currentKey = `${userId}|${date}`
 
-  const loadSchedule = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
-      const res = await api<{ lessons: ScheduleLesson[] }>(`/api/schedule?mode=teacher&id=${userId}&date=${date}`)
-      setLessons(res.lessons)
-      setLoadedKey(currentKey)
+      const [schedule, replacements] = await Promise.all([
+        api<{ lessons: RaspLesson[] }>('/api/rasp'),
+        api<ReplacementsResponse>('/api/replacements'),
+      ])
+      setRasp(schedule.lessons)
+      setRepl({
+        mine: replacements.mine ?? [],
+        incoming: replacements.incoming ?? [],
+        substitutions: replacements.substitutions ?? [],
+      })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось загрузить расписание')
-      setLessons([])
-      setLoadedKey(currentKey)
-    }
-  }, [userId, date, currentKey])
-
-  const loadIncoming = useCallback(async () => {
-    try {
-      const res = await api<{ incoming: IncomingRequest[] }>('/api/replacements')
-      setIncoming(res.incoming)
-    } catch {
-      // тихо: вкладка не об ошибке
+      setRasp([])
+      setRepl({ mine: [], incoming: [], substitutions: [] })
     }
   }, [])
 
-  useEffect(() => {
-    void loadSchedule()
-  }, [loadSchedule])
+  const refresh = useCallback(async () => {
+    setReloading(true)
+    await load()
+    setReloading(false)
+  }, [load])
 
   useEffect(() => {
-    void loadIncoming()
-  }, [loadIncoming])
+    const timer = setTimeout(() => void load(), 0)
+    return () => clearTimeout(timer)
+  }, [load])
+
+  const incoming = repl?.incoming ?? []
 
   async function respond(requestId: number, replacementId: number, accept: boolean) {
     try {
       await api(`/api/replacements/${replacementId}/${accept ? 'accept' : 'decline'}`, { method: 'POST' })
-      toast.success(accept ? 'Вы согласились на замену. Занятие добавлено в ваш журнал работ.' : 'Просьба отклонена')
-      void loadIncoming()
-      void loadSchedule()
+      toast.success(accept ? 'Вы согласились на замену. Занятие появилось в расписании.' : 'Просьба отклонена')
+      void load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось выполнить')
     }
   }
 
-  async function cancelSearch(pair: number) {
+  async function cancelSearch(date: string, pairNumber: number) {
     setCancelling(true)
     try {
-      const res = await api<{ mine: ReplacementItem[] }>('/api/replacements')
-      const target = res.mine.find((r) => r.lessonDate === date && r.pairNumber === pair && r.status === 'SEARCHING')
+      const target = (repl?.mine ?? []).find(
+        (r) => r.lessonDate === date && r.pairNumber === pairNumber && r.status === 'SEARCHING'
+      )
       if (!target) {
         toast.error('Поиск не найден')
         return
       }
       await api(`/api/replacements/${target.id}/cancel`, { method: 'POST' })
       toast.success('Поиск замены отменён')
-      void loadSchedule()
-      void loadIncoming()
+      void load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось отменить')
     } finally {
@@ -94,12 +125,83 @@ function MyReplacements({ userId }: { userId: number }) {
     }
   }
 
+  const rows = useMemo(() => {
+    const list: Row[] = []
+    const seen = new Set<string>()
+    const mineBySlot = new Map<string, ReplacementItem>()
+    for (const r of repl?.mine ?? []) mineBySlot.set(`${r.lessonDate}|${r.pairNumber}`, r)
+
+    for (const l of rasp ?? []) {
+      if (!sameName(l.teacherName, fullName) || l.date < today) continue
+      const key = `${l.date}|${l.pairNumber}`
+      const r = mineBySlot.get(key)
+      list.push({
+        key,
+        date: l.date,
+        pairNumber: l.pairNumber,
+        discipline: l.discipline,
+        kind: l.kind ?? '',
+        groupId: l.groupId ?? '',
+        room: l.room ?? '',
+        own: true,
+        searching: r?.status === 'SEARCHING',
+        replacedBy: r?.status === 'FOUND' ? r.substituteFullName ?? '—' : null,
+        coveringFor: null,
+      })
+      seen.add(key)
+    }
+
+    for (const r of repl?.substitutions ?? []) {
+      if (r.status !== 'FOUND') continue
+      const key = `${r.lessonDate}|${r.pairNumber}`
+      if (seen.has(key)) continue
+      list.push({
+        key: `sub-${r.id}`,
+        date: r.lessonDate,
+        pairNumber: r.pairNumber,
+        discipline: r.discipline,
+        kind: r.kind ?? '',
+        groupId: r.groupId ?? '',
+        room: r.room ?? '',
+        own: false,
+        searching: false,
+        replacedBy: null,
+        coveringFor: r.initiatorFullName,
+      })
+      seen.add(key)
+    }
+
+    return list
+      .filter((r) => r.date >= today)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.pairNumber - b.pairNumber)
+  }, [rasp, repl, fullName, today])
+
+  const byDate = useMemo(() => {
+    const map = new Map<string, Row[]>()
+    for (const r of rows) {
+      const list = map.get(r.date) ?? []
+      list.push(r)
+      map.set(r.date, list)
+    }
+    return [...map.entries()]
+  }, [rows])
+
   return (
-    <section aria-label="Расписание">
-      <h2 className="mb-3 text-base font-semibold">Моё расписание</h2>
+    <section aria-label="Расписание" className="grid gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold">Моё расписание</h2>
+          <p className="text-xs text-muted-foreground">
+            Источник: rasp.sstu.ru, кафедра ПМН. Все дни с {fmtDate(today)}, только ваши занятия.
+          </p>
+        </div>
+        <Button size="sm" variant="outline" disabled={reloading} onClick={() => void refresh()}>
+          {reloading ? 'Обновление…' : 'Обновить'}
+        </Button>
+      </div>
 
       {incoming.length > 0 && (
-        <Card className="mb-4 border-amber-300 bg-amber-50 py-0">
+        <Card className="border-amber-300 bg-amber-50 py-0">
           <CardContent className="p-4">
             <p className="mb-2 text-sm font-semibold text-amber-900">Просьбы о замене ({incoming.length})</p>
             <div className="grid gap-3">
@@ -129,109 +231,131 @@ function MyReplacements({ userId }: { userId: number }) {
         </Card>
       )}
 
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <Button variant="outline" size="icon" aria-label="Предыдущий день" onClick={() => setDate(addDaysStr(date, -1))}>
-          <ChevronLeft aria-hidden />
-        </Button>
-        <button
-          type="button"
-          className="rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-muted"
-          onClick={() => setDate(todayStr())}
-        >
-          {date === today ? 'Сегодня' : date < today ? 'Назад' : 'Впереди'} · {weekdayName(date)}, {fmtDate(date)}
-        </button>
-        <Button variant="outline" size="icon" aria-label="Следующий день" onClick={() => setDate(addDaysStr(date, 1))}>
-          <ChevronRight aria-hidden />
-        </Button>
-      </div>
-
-      {lessons === null || loadedKey !== currentKey ? (
+      {rasp === null || repl === null ? (
         <Spinner label="Загрузка расписания…" />
-      ) : lessons.length === 0 ? (
-        <EmptyState title="Занятий в этот день нет" />
+      ) : byDate.length === 0 ? (
+        <EmptyState
+          title="Ваших занятий в опубликованном расписании нет"
+          hint="Данные берутся с rasp.sstu.ru и обновляются синхронизацией"
+        />
       ) : (
-        <div className="grid gap-2">
-          {lessons.map((l, i) => {
-            const t = pairTime(l.pairNumber)
-            const replaceable = date >= today && !l.searching && !l.replacedBy && !l.isSubstitution
-            return (
-              <Card
-                key={`${l.pairNumber}-${i}`}
-                className={`py-0 ${l.isSubstitution ? 'border-green-400 bg-green-50' : ''}`}
-              >
-                <CardContent className="flex items-start gap-3 p-4">
-                  <div className="flex w-11 shrink-0 flex-col items-center rounded-lg bg-muted py-1.5">
-                    <span className="text-[10px] text-muted-foreground">пара</span>
-                    <span className="text-base leading-none font-semibold">{l.pairNumber}</span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-muted-foreground">{t.start}–{t.end}</span>
-                      <KindBadge kind={l.kind} />
-                    </div>
-                    <p className={`mt-1 text-sm font-medium leading-snug ${l.replacedBy ? 'line-through decoration-foreground/50' : ''}`}>
-                      {l.discipline}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      группа {l.groupId}
-                      {l.room ? ` · ауд. ${l.room}` : ''}
-                    </p>
-                    {l.searching && (
-                      <div className="mt-2 flex items-center justify-between gap-2">
-                        <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                          Идёт поиск замены
-                        </span>
+        <div className="grid gap-4">
+          {byDate.map(([date, list]) => (
+            <div key={date} className="grid gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold">
+                  {weekdayName(date)}, {fmtDate(date)}
+                </h3>
+                {date === today && (
+                  <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] text-primary-foreground">сегодня</span>
+                )}
+                <span className="text-xs text-muted-foreground">{list.length} занятий</span>
+              </div>
+
+              {list.map((r) => {
+                const t = pairTime(r.pairNumber)
+                const canReplace = r.own && !r.searching && !r.replacedBy
+                return (
+                  <Card
+                    key={r.key}
+                    className={`py-0 ${r.coveringFor ? 'border-green-400 bg-green-50' : r.replacedBy ? 'border-stone-300' : ''}`}
+                  >
+                    <CardContent className="flex items-start gap-3 p-3">
+                      <div className="flex w-11 shrink-0 flex-col items-center rounded-lg bg-muted py-1.5">
+                        <span className="text-[10px] text-muted-foreground">пара</span>
+                        <span className="text-base leading-none font-semibold">{r.pairNumber}</span>
                       </div>
-                    )}
-                    {l.replacedBy && (
-                      <p className="mt-2 rounded-full border border-green-400 bg-green-100 px-2 py-0.5 text-xs font-medium text-green-900">
-                        Заменяет: {l.replacedBy}
-                      </p>
-                    )}
-                    {l.isSubstitution && (
-                      <p className="mt-2 rounded-full border border-green-400 bg-green-100 px-2 py-0.5 text-xs font-medium text-green-900">
-                        Вы заменяете
-                      </p>
-                    )}
-                  </div>
-                  {replaceable && (
-                    <Button size="sm" variant="outline" className="shrink-0" onClick={() => setWizard({ pair: l.pairNumber, lesson: l })}>
-                      Заменить
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            )
-          })}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <span>
+                            {t.start}–{t.end}
+                          </span>
+                          {r.kind && <KindBadge kind={r.kind} />}
+                        </div>
+                        <p className={`mt-1 text-sm font-medium leading-snug ${r.replacedBy ? 'line-through decoration-foreground/50' : ''}`}>
+                          {r.discipline}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {r.groupId ? `группа ${r.groupId}` : ''}
+                          {r.room ? `${r.groupId ? ' · ' : ''}ауд. ${r.room}` : ''}
+                        </p>
+
+                        {r.searching && (
+                          <p className="mt-2 inline-flex rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                            Идёт поиск замены
+                          </p>
+                        )}
+                        {r.replacedBy && (
+                          <p className="mt-2 inline-flex rounded-full border border-green-400 bg-green-100 px-2 py-0.5 text-xs font-medium text-green-900">
+                            Вас заменяют — {r.replacedBy}
+                          </p>
+                        )}
+                        {r.coveringFor && (
+                          <p className="mt-2 inline-flex rounded-full border border-green-400 bg-green-100 px-2 py-0.5 text-xs font-medium text-green-900">
+                            Замена — {r.coveringFor}
+                          </p>
+                        )}
+                      </div>
+
+                      {canReplace && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0"
+                          onClick={() =>
+                            setWizard({
+                              date: r.date,
+                              pair: r.pairNumber,
+                              lesson: {
+                                pairNumber: r.pairNumber,
+                                start: '',
+                                end: '',
+                                discipline: r.discipline,
+                                kind: r.kind,
+                                groupId: r.groupId,
+                                room: r.room || null,
+                              },
+                            })
+                          }
+                        >
+                          Замена
+                        </Button>
+                      )}
+
+                      {r.searching && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0"
+                          disabled={cancelling}
+                          onClick={() => void cancelSearch(r.date, r.pairNumber)}
+                        >
+                          <SearchX aria-hidden />
+                          Отменить
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          ))}
         </div>
       )}
 
       {wizard && (
         <ReplacementWizard
-          date={date}
+          date={wizard.date}
           pair={wizard.pair}
           lesson={wizard.lesson}
           onClose={() => setWizard(null)}
           onCreated={() => {
             setWizard(null)
-            void loadSchedule()
+            // даём запросу закрепиться в базе
+            setTimeout(() => void load(), 400)
           }}
         />
-      )}
-
-      {lessons !== null && loadedKey === currentKey && lessons.some((l) => l.searching) && (
-        <Button
-          variant="outline"
-          className="mt-4 w-full"
-          disabled={cancelling}
-          onClick={() => {
-            const l = lessons.find((x) => x.searching)
-            if (l) void cancelSearch(l.pairNumber)
-          }}
-        >
-          <SearchX aria-hidden />
-          {cancelling ? 'Отмена…' : 'Отменить поиск замены на этот день'}
-        </Button>
       )}
     </section>
   )
@@ -283,7 +407,15 @@ function ReplacementWizard({
     try {
       await api('/api/replacements', {
         method: 'POST',
-        body: { date, pairNumber: pair, candidateIds: selected },
+        body: {
+          date,
+          pairNumber: pair,
+          candidateIds: selected,
+          discipline: lesson.discipline,
+          groupId: lesson.groupId,
+          kind: lesson.kind,
+          room: lesson.room ?? '',
+        },
       })
       setSent(true)
       toast.success(`Просьба отправлена (${selected.length})`)
@@ -302,7 +434,8 @@ function ReplacementWizard({
         <DialogHeader>
           <DialogTitle>Замена занятия</DialogTitle>
           <DialogDescription>
-            {lesson.discipline} ({lesson.kind}), группа {lesson.groupId}
+            {lesson.discipline}
+            {lesson.kind ? ` (${lesson.kind})` : ''}, группа {lesson.groupId}
             <br />
             {weekdayName(date)}, {fmtDate(date)}, {pair}-я пара ({t.start}–{t.end})
             {lesson.room ? `, ауд. ${lesson.room}` : ''}
@@ -368,140 +501,5 @@ function ReplacementWizard({
         )}
       </DialogContent>
     </Dialog>
-  )
-}
-
-// Обновлённая вкладка «Расписание»: общий список кафедры + мои замены
-export function ScheduleTab({ userId, fullName }: { userId: number; fullName: string }) {
-  return (
-    <section aria-label="Расписание">
-      <Tabs defaultValue="dept">
-        <TabsList className="w-full">
-          <TabsTrigger value="dept" className="flex-1">
-            Расписание
-          </TabsTrigger>
-          <TabsTrigger value="mine" className="flex-1">
-            Мои замены
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="dept" className="mt-4">
-          <DeptSchedule fullName={fullName} />
-        </TabsContent>
-        <TabsContent value="mine" className="mt-4">
-          <MyReplacements userId={userId} />
-        </TabsContent>
-      </Tabs>
-    </section>
-  )
-}
-
-// ФИО сравниваем без учёта регистра и «ё»
-function sameName(a: string, b: string): boolean {
-  const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim()
-  return norm(a) === norm(b)
-}
-
-// Расписание преподавателя с rasp.sstu.ru: только свои занятия, сплошным списком по дням от сегодня
-function DeptSchedule({ fullName }: { fullName: string }) {
-  const [lessons, setLessons] = useState<RaspLesson[] | null>(null)
-  const [reloading, setReloading] = useState(false)
-  const today = todayStr()
-
-  const load = useCallback(async () => {
-    setReloading(true)
-    try {
-      const res = await api<{ lessons: RaspLesson[] }>('/api/rasp')
-      setLessons(res.lessons)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось загрузить расписание')
-      setLessons([])
-    } finally {
-      setReloading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  const visible = useMemo(() => {
-    return (lessons ?? [])
-      .filter((l) => sameName(l.teacherName, fullName) && l.date >= today)
-      .sort((a, b) => a.date.localeCompare(b.date) || a.pairNumber - b.pairNumber)
-  }, [lessons, today, fullName])
-
-  const byDate = useMemo(() => {
-    const map = new Map<string, RaspLesson[]>()
-    for (const l of visible) {
-      const list = map.get(l.date) ?? []
-      list.push(l)
-      map.set(l.date, list)
-    }
-    return [...map.entries()]
-  }, [visible])
-
-  return (
-    <div className="grid gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-base font-semibold">Моё расписание</h2>
-          <p className="text-xs text-muted-foreground">
-            Источник: rasp.sstu.ru, кафедра ПМН. Все дни с {fmtDate(today)}, только ваши занятия.
-          </p>
-        </div>
-        <Button size="sm" variant="outline" disabled={reloading} onClick={() => void load()}>
-          {reloading ? 'Обновление…' : 'Обновить'}
-        </Button>
-      </div>
-
-      {lessons === null ? (
-        <Spinner label="Загрузка расписания…" />
-      ) : byDate.length === 0 ? (
-        <EmptyState
-          title="Ваших занятий в опубликованном расписании нет"
-          hint="Данные берутся с rasp.sstu.ru и обновляются синхронизацией"
-        />
-      ) : (
-        <div className="grid gap-4">
-          {byDate.map(([date, list]) => (
-            <div key={date} className="grid gap-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold">
-                  {weekdayName(date)}, {fmtDate(date)}
-                </h3>
-                {date === today && (
-                  <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] text-primary-foreground">сегодня</span>
-                )}
-                <span className="text-xs text-muted-foreground">{list.length} занятий</span>
-              </div>
-              {list.map((l, i) => {
-                const t = pairTime(l.pairNumber)
-                return (
-                  <Card key={`${date}-${l.pairNumber}-${i}`} className="py-0">
-                    <CardContent className="flex items-start gap-3 p-3">
-                      <div className="flex w-11 shrink-0 flex-col items-center rounded-lg bg-muted py-1.5">
-                        <span className="text-[10px] text-muted-foreground">пара</span>
-                        <span className="text-base leading-none font-semibold">{l.pairNumber}</span>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <span>{t.start}–{t.end}</span>
-                          {l.kind && <KindBadge kind={l.kind} />}
-                        </div>
-                        <p className="mt-1 text-sm font-medium leading-snug">{l.discipline}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {l.groupId ? `группа ${l.groupId}` : ''}
-                          {l.room ? `${l.groupId ? ' · ' : ''}ауд. ${l.room}` : ''}
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   )
 }
