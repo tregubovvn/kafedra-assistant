@@ -8,9 +8,6 @@ build/
 .env.*
 !.env.example
 
-# локальный конфиг приложения (anon key и общий пароль)
-public/config.js
-
 # артефакты
 *.log
 dev.log

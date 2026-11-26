@@ -53,7 +53,7 @@ window.KAFEDRA_CONFIG = {
 }
 ```
 
-Файл не входит в репозиторий (`.gitignore`) и не перезаписывается при деплое — его правят прямо на сервере, пересборка не нужна.
+Файл попадает в сборку и хранится в репозитории: `public/config.js` → `site/config.js`.
 
 ## Локальный запуск
 
@@ -83,26 +83,24 @@ npm run db:seed          # демо-данные (ОЧИЩАЕТ базу)
 
 Каталог на сервере: `/var/www/html/kafedra-assistant`, Node и PM2 не нужны.
 
-**1. Сборка**
+**1. Сборка и публикация в репозиторий**
+
+Собранный сайт хранится в репозитории — каталог `site/`.
 
 ```bash
 npm ci
-npm run build:static      # out/
+npm run build:static     # out/
+npm run publish:static   # out/ -> site/
+git add site && git commit -m "Update static site" && git push
 ```
 
-**2. Файлы на сервер**
+**2. Деплой на сервер**
 
-Содержимое `out/` копируется в `/var/www/html/kafedra-assistant` (workflow делает это автоматически, см. `deploy/github-actions-main.yml`).
+Workflow `.github/workflows/main.yml` на push в `main` копирует `site/*` в `/var/www/html/kafedra-assistant` по SSH. Сборки и Node на сервере нет — только файлы.
 
-**3. config.js**
+**3. Настройки**
 
-Один раз на сервере:
-
-```bash
-cd /var/www/html/kafedra-assistant
-cp config.example.js config.js   # если файла ещё нет
-nano config.js                   # SUPABASE_ANON_KEY, SHARED_PASSWORD
-```
+`public/config.js` попадает в сборку и в `site/config.js`: `SUPABASE_URL`, `SUPABASE_ANON_KEY` (publishable) и `SHARED_PASSWORD`. Ключ публичный по определению, поэтому лежит в репозитории.
 
 **4. nginx**
 
@@ -136,7 +134,7 @@ curl -I https://tregubovvn.ru/kafedra-assistant/     # 200
 curl https://tregubovvn.ru/kafedra-assistant/config.js
 ```
 
-Автодеплой: `.github/workflows/main.yml` собирает статику и копирует `out/` по SSH. Правка workflow требует токен со scope `workflow`; готовый файл — `deploy/github-actions-main.yml`.
+Обновление сайта: правки → `npm run build:static && npm run publish:static` → коммит `site/` → push. Правка `.github/workflows/main.yml` требует токен со scope `workflow`; готовый файл — `deploy/github-actions-main.yml`.
 
 ## Структура
 
@@ -148,6 +146,8 @@ src/lib/client.ts             # клиентский слой: Supabase REST в�
 src/app/page.tsx              # SPA: вход + маршрутизация по роли
 src/components/app/           # клиенты: teacher-app (мобильный), head-app (десктоп)
 src/components/ui/            # набор shadcn/ui
-public/config.example.js      # шаблон настроек (config.js создаётся на сервере)
+public/config.js              # настройки (Supabase URL, publishable key, пароль)
+site/                         # собранная статика для публикации
+scripts/publish-static.mjs    # out/ -> site/
 deploy/nginx.conf.example     # пример конфигурации nginx
 ```

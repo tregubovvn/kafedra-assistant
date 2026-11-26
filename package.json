@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
     "build:static": "STATIC_EXPORT=1 NEXT_PUBLIC_BASE_PATH=/kafedra-assistant next build",
+    "publish:static": "node scripts/publish-static.mjs",
     "lint": "eslint .",
     "db:push": "node scripts/db-push.mjs",
     "db:seed": "node scripts/seed.mjs"
