@@ -29,3 +29,5 @@ jobs:
           port: 22
           source: "site/*"
           target: "/var/www/html/kafedra-assistant"
+          # без этого файлы лягут в target/site/... вместо корня каталога
+          strip_components: 1
