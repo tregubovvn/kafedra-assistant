@@ -1,7 +1,7 @@
 'use client'
 
-// Журнал работ преподавателя: карточки; при добавлении — только авторское описание,
-// ссылка на новость, дата и вид работы
+// Журнал работ преподавателя: карточки; добавление — четыре поля автора,
+// редактирование — все поля работы. Название — первые 100 символов описания.
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,15 @@ import { api } from '@/lib/client'
 import { fmtDate, todayStr, WORK_TYPE_LABEL, WORK_TYPES } from '@/lib/schedule'
 import type { WorkItem } from '@/lib/types'
 import { EmptyState, Spinner, WorkTypeBadge } from '@/components/app/bits'
+
+// Название работы — первые 100 символов текста (переводы строк → пробел)
+export function titleFrom(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  if (flat.length <= 100) return flat
+  const cut = flat.slice(0, 100)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 60 ? cut.slice(0, lastSpace) : cut).trim()
+}
 
 export function WorksTab() {
   const [items, setItems] = useState<WorkItem[] | null>(null)
@@ -76,15 +85,28 @@ export function WorksTab() {
         ))
       )}
 
-      <AuthorWorkDialog
-        open={open}
-        item={editing}
-        onClose={() => setOpen(false)}
-        onSaved={() => {
-          setOpen(false)
-          void load()
-        }}
-      />
+      {open && !editing && (
+        <AuthorWorkDialog
+          open
+          onClose={() => setOpen(false)}
+          onSaved={() => {
+            setOpen(false)
+            void load()
+          }}
+        />
+      )}
+
+      {open && editing && (
+        <WorkDialog
+          open
+          item={editing}
+          onClose={() => setOpen(false)}
+          onSaved={() => {
+            setOpen(false)
+            void load()
+          }}
+        />
+      )}
     </section>
   )
 }
@@ -99,7 +121,7 @@ export function WorkCard({
   onEdit: () => void
   showAuthor?: boolean
 }) {
-  const heading = w.title || w.authorDescription || w.description
+  const heading = w.title || titleFrom(w.authorDescription || w.description)
   const authorText = w.authorDescription.trim()
   const officialText = w.description.trim()
   const sameText = !authorText || !officialText || authorText === officialText
@@ -144,19 +166,16 @@ export function WorkCard({
   )
 }
 
-// Форма автора: описание создателя (оно же название), ссылка на новость, дата и вид работы
+// Форма автора при добавлении: описание создателем (оно же название), ссылка, дата, вид
 function AuthorWorkDialog({
   open,
-  item,
   onClose,
   onSaved,
 }: {
   open: boolean
-  item: WorkItem | null
   onClose: () => void
   onSaved: () => void
 }) {
-  const isEdit = Boolean(item)
   const [authorDescription, setAuthorDescription] = useState('')
   const [date, setDate] = useState('')
   const [type, setType] = useState('TEACHING')
@@ -165,31 +184,27 @@ function AuthorWorkDialog({
 
   useEffect(() => {
     if (!open) return
-    setAuthorDescription(item?.authorDescription || item?.description || '')
-    setDate(item?.date ?? todayStr())
-    setType(item?.type ?? 'TEACHING')
-    setNewsUrl(item?.newsUrl ?? '')
-  }, [open, item])
+    setAuthorDescription('')
+    setDate(todayStr())
+    setType('TEACHING')
+    setNewsUrl('')
+  }, [open])
 
   async function save() {
     setSaving(true)
     try {
-      const title = authorDescription.split('\n')[0].slice(0, 120).trim()
-      const body = {
-        title,
-        authorDescription,
-        description: item?.description || authorDescription,
-        date,
-        type,
-        newsUrl: newsUrl || null,
-      }
-      if (isEdit && item) {
-        await api(`/api/works/${item.id}`, { method: 'PATCH', body })
-        toast.success('Работа обновлена')
-      } else {
-        await api('/api/works', { method: 'POST', body })
-        toast.success('Работа добавлена в журнал')
-      }
+      await api('/api/works', {
+        method: 'POST',
+        body: {
+          title: titleFrom(authorDescription),
+          authorDescription,
+          description: authorDescription,
+          date,
+          type,
+          newsUrl: newsUrl || null,
+        },
+      })
+      toast.success('Работа добавлена в журнал')
       onSaved()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось сохранить работу')
@@ -202,9 +217,9 @@ function AuthorWorkDialog({
     <Dialog open={open} onOpenChange={(o) => (!o ? onClose() : undefined)}>
       <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Редактировать работу' : 'Новая работа'}</DialogTitle>
+          <DialogTitle>Новая работа</DialogTitle>
           <DialogDescription>
-            Опишите работу своими словами — этот текст станет названием карточки.
+            Название соберётся из первых 100 символов описания.
           </DialogDescription>
         </DialogHeader>
 
@@ -261,7 +276,7 @@ function AuthorWorkDialog({
   )
 }
 
-// Форма заведующего: полное редактирование, включая официальное описание и DeepSeek
+// Полная форма работы — при редактировании (автор и заведующий), с DeepSeek у заведующего
 export function WorkDialog({
   open,
   item,
@@ -318,7 +333,14 @@ export function WorkDialog({
   async function save() {
     setSaving(true)
     try {
-      const body = { title, date, type, description, authorDescription, newsUrl: newsUrl || null }
+      const body = {
+        title: title.trim() || titleFrom(description || authorDescription),
+        date,
+        type,
+        description,
+        authorDescription,
+        newsUrl: newsUrl || null,
+      }
       if (isEdit && item) {
         await api(`/api/works/${item.id}`, { method: 'PATCH', body })
         toast.success('Работа обновлена')
@@ -342,7 +364,7 @@ export function WorkDialog({
           <DialogDescription>
             {headMode
               ? 'Заведующий может уточнить описание работы — в том числе через DeepSeek.'
-              : 'Название, описание, авторская формулировка и дата выполнения.'}
+              : 'Все поля работы: название, описание, авторская формулировка, дата и вид.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -350,6 +372,9 @@ export function WorkDialog({
           <div className="grid gap-1.5">
             <Label htmlFor="w-title">Название работы</Label>
             <Input id="w-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <p className="text-[11px] text-muted-foreground">
+              Если оставить пустым — соберётся из первых 100 символов описания.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -408,7 +433,7 @@ export function WorkDialog({
             Отмена
           </Button>
           <Button
-            disabled={saving || title.trim().length < 3 || description.trim().length < 3 || !date}
+            disabled={saving || !title.trim() && (authorDescription.trim().length < 3 && description.trim().length < 3) || !date || description.trim().length < 3}
             onClick={() => void save()}
           >
             {saving ? 'Сохранение…' : 'Сохранить'}

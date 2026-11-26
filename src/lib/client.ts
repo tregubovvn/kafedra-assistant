@@ -7,6 +7,15 @@ import type { AppUser } from './types'
 const TOKEN_KEY = 'kafedra_token'
 const USER_KEY = 'kafedra_user'
 
+// Название работы — первые 100 символов текста (переводы строк → пробел)
+function titleFrom(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  if (flat.length <= 100) return flat
+  const cut = flat.slice(0, 100)
+  const lastSpace = cut.lastIndexOf(' ')
+  return (lastSpace > 60 ? cut.slice(0, lastSpace) : cut).trim()
+}
+
 // Приложение публикуется по подпути (/kafedra-assistant)
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
 
@@ -313,15 +322,17 @@ export async function api<T = unknown>(
 
   if (p === '/api/works' && method === 'POST') {
     const me = requireUser()
+    const authorDescription = String(body.authorDescription ?? '')
+    const description = String(body.description ?? authorDescription)
     const rows = await rest('Work', {
       method: 'POST',
       body: {
         userId: me.id,
-        title: String(body.title ?? '').trim(),
+        title: String(body.title ?? '').trim() || titleFrom(description || authorDescription),
         date: body.date,
         type: body.type,
-        description: body.description,
-        authorDescription: body.authorDescription ?? '',
+        description,
+        authorDescription: authorDescription || description,
         newsUrl: body.newsUrl ?? null,
       },
     })
@@ -339,7 +350,10 @@ export async function api<T = unknown>(
     }
 
     const patch: Record<string, unknown> = {}
-    if (body.title !== undefined) patch.title = String(body.title)
+    if (body.title !== undefined) {
+      const explicit = String(body.title).trim()
+      patch.title = explicit || titleFrom(String(body.description ?? body.authorDescription ?? ''))
+    }
     if (body.description !== undefined) patch.description = String(body.description)
     if (body.authorDescription !== undefined) patch.authorDescription = String(body.authorDescription)
     if (body.date !== undefined) patch.date = String(body.date)
