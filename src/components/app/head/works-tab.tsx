@@ -1,18 +1,16 @@
 'use client'
 
-// Журнал работ кафедры: фильтры и карточки с редактированием (включая DeepSeek)
+// Журнал работ кафедры: фильтры, карточки и редактирование (включая DeepSeek)
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/client'
-import { fmtDate, WORK_TYPE_LABEL, WORK_TYPES } from '@/lib/schedule'
+import { WORK_TYPE_LABEL, WORK_TYPES } from '@/lib/schedule'
 import type { AppUser, WorkItem } from '@/lib/types'
-import { EmptyState, Spinner, WorkTypeBadge } from '@/components/app/bits'
-import { WorkDialog } from '@/components/app/teacher/works-tab'
+import { EmptyState, Spinner } from '@/components/app/bits'
+import { WorkCard, WorkDialog } from '@/components/app/teacher/works-tab'
 
 export function HeadWorksTab() {
   const [items, setItems] = useState<WorkItem[] | null>(null)
@@ -108,50 +106,15 @@ export function HeadWorksTab() {
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
           {items.map((w) => (
-            <Card key={w.id} className="py-0">
-              <CardContent className="grid gap-2 p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-medium leading-snug">{w.title || w.description.slice(0, 60)}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {w.userFullName} · {fmtDate(w.date)}
-                    </p>
-                  </div>
-                  <WorkTypeBadge type={w.type} />
-                </div>
-
-                <p className="text-sm whitespace-pre-line">{w.description}</p>
-
-                {w.authorDescription && w.authorDescription !== w.description && (
-                  <div className="rounded-lg border border-dashed p-2">
-                    <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                      Описание автора
-                    </p>
-                    <p className="mt-1 text-sm whitespace-pre-line">{w.authorDescription}</p>
-                  </div>
-                )}
-
-                {w.newsUrl && (
-                  <a className="text-xs text-primary underline underline-offset-2" href={w.newsUrl} target="_blank" rel="noreferrer">
-                    Ссылка на новость
-                  </a>
-                )}
-
-                <div className="flex justify-end">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setEditing(w)
-                      setOpen(true)
-                    }}
-                  >
-                    <Pencil aria-hidden />
-                    Редактировать
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <WorkCard
+              key={w.id}
+              work={w}
+              showAuthor
+              onEdit={() => {
+                setEditing(w)
+                setOpen(true)
+              }}
+            />
           ))}
         </div>
       )}
