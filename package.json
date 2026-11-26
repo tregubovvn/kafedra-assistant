@@ -8,7 +8,8 @@
     "publish:static": "node scripts/publish-static.mjs",
     "lint": "eslint .",
     "db:push": "node scripts/db-push.mjs",
-    "db:seed": "node scripts/seed.mjs"
+    "db:seed": "node scripts/seed.mjs",
+    "sync:rasp": "node scripts/sync-rasp.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

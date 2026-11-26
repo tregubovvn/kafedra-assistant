@@ -111,3 +111,13 @@ export interface MailItem {
   body: string
   createdAt: string
 }
+
+export interface RaspLesson {
+  teacherName: string
+  date: string
+  pairNumber: number
+  discipline: string
+  kind: string
+  groupId: string
+  room: string
+}

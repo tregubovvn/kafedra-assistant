@@ -43,7 +43,7 @@ export function TeacherApp({ user, onLogout }: { user: AppUser; onLogout: () => 
         <main className="flex-1 px-4 pt-4 pb-28">
           {tab === 'works' && <WorksTab />}
           {tab === 'assignments' && <AssignmentsTab userId={user.id} />}
-          {tab === 'schedule' && <ScheduleTab userId={user.id} />}
+          {tab === 'schedule' && <ScheduleTab userId={user.id} fullName={user.fullName} />}
         </main>
 
         <nav aria-label="Основная навигация" className="fixed inset-x-0 bottom-0 z-30 border-t bg-background">

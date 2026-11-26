@@ -20,10 +20,11 @@ import { ChevronLeft, ChevronRight, SearchX, UserCheck, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/client'
 import { addDaysStr, fmtDate, pairTime, todayStr, weekdayName } from '@/lib/schedule'
-import type { CandidateGroup, IncomingRequest, ReplacementItem, ScheduleLesson } from '@/lib/types'
+import type { CandidateGroup, IncomingRequest, RaspLesson, ReplacementItem, ScheduleLesson } from '@/lib/types'
 import { EmptyState, KindBadge, Spinner } from '@/components/app/bits'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-export function ScheduleTab({ userId }: { userId: number }) {
+function MyReplacements({ userId }: { userId: number }) {
   const [date, setDate] = useState(todayStr())
   const [lessons, setLessons] = useState<ScheduleLesson[] | null>(null)
   const [loadedKey, setLoadedKey] = useState('')
@@ -367,5 +368,148 @@ function ReplacementWizard({
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+// Обновлённая вкладка «Расписание»: общий список кафедры + мои замены
+export function ScheduleTab({ userId, fullName }: { userId: number; fullName: string }) {
+  return (
+    <section aria-label="Расписание">
+      <Tabs defaultValue="dept">
+        <TabsList className="w-full">
+          <TabsTrigger value="dept" className="flex-1">
+            Расписание кафедры
+          </TabsTrigger>
+          <TabsTrigger value="mine" className="flex-1">
+            Мои замены
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="dept" className="mt-4">
+          <DeptSchedule fullName={fullName} />
+        </TabsContent>
+        <TabsContent value="mine" className="mt-4">
+          <MyReplacements userId={userId} />
+        </TabsContent>
+      </Tabs>
+    </section>
+  )
+}
+
+// Расписание кафедры с rasp.sstu.ru: сплошной список по всем дням от сегодня
+function DeptSchedule({ fullName }: { fullName: string }) {
+  const [lessons, setLessons] = useState<RaspLesson[] | null>(null)
+  const [onlyMine, setOnlyMine] = useState(false)
+  const [reloading, setReloading] = useState(false)
+  const today = todayStr()
+
+  const load = useCallback(async () => {
+    setReloading(true)
+    try {
+      const res = await api<{ lessons: RaspLesson[] }>('/api/rasp')
+      setLessons(res.lessons)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось загрузить расписание кафедры')
+      setLessons([])
+    } finally {
+      setReloading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const visible = useMemo(() => {
+    return (lessons ?? [])
+      .filter((l) => l.date >= today && (!onlyMine || l.teacherName === fullName))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.pairNumber - b.pairNumber || a.teacherName.localeCompare(b.teacherName))
+  }, [lessons, today, onlyMine, fullName])
+
+  const byDate = useMemo(() => {
+    const map = new Map<string, RaspLesson[]>()
+    for (const l of visible) {
+      const list = map.get(l.date) ?? []
+      list.push(l)
+      map.set(l.date, list)
+    }
+    return [...map.entries()]
+  }, [visible])
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant={onlyMine ? 'outline' : 'default'}
+            onClick={() => setOnlyMine(false)}
+          >
+            Вся кафедра
+          </Button>
+          <Button size="sm" variant={onlyMine ? 'default' : 'outline'} onClick={() => setOnlyMine(true)}>
+            Только мои
+          </Button>
+        </div>
+        <Button size="sm" variant="outline" disabled={reloading} onClick={() => void load()}>
+          {reloading ? 'Обновление…' : 'Обновить'}
+        </Button>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Источник: rasp.sstu.ru, кафедра ПМН. Показаны все дни с {fmtDate(today)}.
+      </p>
+
+      {lessons === null ? (
+        <Spinner label="Загрузка расписания…" />
+      ) : byDate.length === 0 ? (
+        <EmptyState
+          title={onlyMine ? 'Ваших занятий в расписании нет' : 'Расписание на ближайшие дни не опубликовано'}
+          hint="Данные обновляются синхронизацией с rasp.sstu.ru"
+        />
+      ) : (
+        <div className="grid gap-4">
+          {byDate.map(([date, list]) => (
+            <div key={date} className="grid gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold">
+                  {weekdayName(date)}, {fmtDate(date)}
+                </h3>
+                {date === today && (
+                  <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] text-primary-foreground">сегодня</span>
+                )}
+                <span className="text-xs text-muted-foreground">{list.length} занятий</span>
+              </div>
+              {list.map((l, i) => {
+                const t = pairTime(l.pairNumber)
+                const mine = l.teacherName === fullName
+                return (
+                  <Card key={`${date}-${l.pairNumber}-${l.teacherName}-${i}`} className={`py-0 ${mine ? 'border-primary/40' : ''}`}>
+                    <CardContent className="flex items-start gap-3 p-3">
+                      <div className="flex w-11 shrink-0 flex-col items-center rounded-lg bg-muted py-1.5">
+                        <span className="text-[10px] text-muted-foreground">пара</span>
+                        <span className="text-base leading-none font-semibold">{l.pairNumber}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <span>{t.start}–{t.end}</span>
+                          {l.kind && <KindBadge kind={l.kind} />}
+                          {mine && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary">моё</span>}
+                        </div>
+                        <p className="mt-1 text-sm font-medium leading-snug">{l.discipline}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {l.groupId ? `группа ${l.groupId}` : ''}
+                          {l.room ? `${l.groupId ? ' · ' : ''}ауд. ${l.room}` : ''}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{l.teacherName}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

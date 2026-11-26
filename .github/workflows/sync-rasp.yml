@@ -1,0 +1,27 @@
+name: sync-rasp
+
+# Ежедневная синхронизация расписания кафедры с rasp.sstu.ru.
+# Требуется секрет репозитория DATABASE_URL (строка подключения Supabase, как в .env).
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # 06:00 по Саратову
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: Синхронизация расписания
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: node scripts/sync-rasp.mjs
