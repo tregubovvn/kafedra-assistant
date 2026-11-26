@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export const metadata: Metadata = {
-  title: "Ассистент кафедры ПМН",
+  title: "Цифровой помощник зав. кафедрой",
   description:
     "Ассистент заведующего кафедрой «Производственный менеджмент» СГТУ имени Гагарина Ю.А.: поручения, замены, расписание, журнал работ.",
 };

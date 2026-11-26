@@ -26,7 +26,7 @@ export function TeacherApp({ user, onLogout }: { user: AppUser; onLogout: () => 
         <header className="sticky top-0 z-30 bg-primary text-primary-foreground">
           <div className="flex items-center justify-between px-4 py-3">
             <div>
-              <p className="text-sm font-semibold leading-tight">Ассистент кафедры ПМН</p>
+              <p className="text-sm font-semibold leading-tight">Цифровой помощник зав. кафедрой</p>
               <p className="text-xs opacity-80">{user.fullName}</p>
             </div>
             <button
