@@ -45,15 +45,33 @@ const PAIR_TIMES = {
 }
 
 const TEACHERS = [
-  ['Гримашевич Ольга Николаевна', 'grimashevich@pmn.demo'],
-  ['Горячева Ирина Алексеевна', 'goryacheva@pmn.demo'],
-  ['Учуваткин Александр Александрович', 'uchuvatkin@pmn.demo'],
-  ['Уманский Вячеслав Юрьевич', 'umanskij@pmn.demo'],
-  ['Лысикова Ольга Валерьевна', 'lysikova@pmn.demo'],
-  ['Подсумкова Людмила Алексеевна', 'podsumkova@pmn.demo'],
-  ['Глушкова Юлия Олеговна', 'glushkova@pmn.demo'],
-  ['Славнецкова Людмила Владимировна', 'slavnetskova@pmn.demo'],
-  ['Макарова Светлана Николаевна', 'makarova@pmn.demo'],
+  ['Алексеева Ольга Сергеевна', 'alekseeva@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Бехер Ева Александровна', 'beher@pmn.demo', 'Ассистент', ''],
+  ['Глушкова Юлия Олеговна', 'glushkova@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Горячева Ирина Алексеевна', 'goryacheva@pmn.demo', 'Профессор', 'доктор экономических наук, доцент'],
+  ['Гримашевич Ольга Николаевна', 'grimashevich@pmn.demo', 'Профессор', 'доктор экономических наук, профессор'],
+  ['Жулина Елена Геннадиевна', 'zhulina@pmn.demo', 'Профессор', 'доктор экономических наук, доцент'],
+  ['Ипполитова Анна Александровна', 'ippolitova@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Казакова Нина Васильевна', 'kazakova@pmn.demo', 'Профессор', 'доктор экономических наук, профессор'],
+  ['Козловский Дмитрий Валентинович', 'kozlovskij@pmn.demo', 'Профессор', 'доктор филологических наук, доцент'],
+  ['Кравцов Роман Сергеевич', 'kravtsov@pmn.demo', 'Старший преподаватель', ''],
+  ['Лобов Артем Сергеевич', 'lobov@pmn.demo', 'Ассистент', ''],
+  ['Лысикова Ольга Валерьевна', 'lysikova@pmn.demo', 'Профессор', 'доктор социологических наук, доцент'],
+  ['Макаров Антон Алексеевич', 'makarov@pmn.demo', 'Ассистент', ''],
+  ['Макарова Светлана Николаевна', 'makarova@pmn.demo', 'Доцент', 'кандидат социологических наук, доцент'],
+  ['Матушкин Михаил Александрович', 'matushkin@pmn.demo', 'Профессор', 'доктор экономических наук, профессор'],
+  ['Мухина Инна Васильевна', 'muhina@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Одинцова Татьяна Николаевна', 'odintsova@pmn.demo', 'Профессор', 'доктор экономических наук, доцент'],
+  ['Подсумкова Людмила Алексеевна', 'podsumkova@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Пузанова Елена Александровна', 'puzanova@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Сарасеко Елена Сергеевна', 'saraseko@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Славнецкова Людмила Владимировна', 'slavnetskova.docent@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Трегубов Владимир Николаевич', 'tregubovvn@outlook.com', 'Профессор', 'доктор экономических наук, доцент'],
+  ['Уманская Марина Викторовна', 'umanskaya@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Уманский Вячеслав Юрьевич', 'umanskij@pmn.demo', 'Доцент', 'кандидат экономических наук'],
+  ['Учуваткин Александр Александрович', 'uchuvatkin@pmn.demo', 'Старший преподаватель', ''],
+  ['Хачатрян Гаянэ Альбертовна', 'hachatryan@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
+  ['Эмих Инна Вячеславовна', 'emih@pmn.demo', 'Доцент', 'кандидат экономических наук, доцент'],
 ]
 
 const DISCIPLINES = [
@@ -97,15 +115,15 @@ async function main() {
   console.log('Создание пользователей...')
   const pwd = hashPassword('demo1234')
   const [head] = await sql`
-    insert into "User" ("fullName", email, role, "passwordHash")
-    values ('Трегубов Владимир Николаевич', 'tregubovvn@outlook.com', 'HEAD', ${pwd})
+    insert into "User" ("fullName", email, role, "passwordHash", position, degree)
+    values ('Славнецкова Людмила Владимировна', 'slavnetskova@pmn.demo', 'HEAD', ${pwd}, 'Заведующий кафедрой', 'кандидат экономических наук, доцент')
     returning *
   `
   const teachers = []
-  for (const [fullName, email] of TEACHERS) {
+  for (const [fullName, email, position, degree] of TEACHERS) {
     const [t] = await sql`
-      insert into "User" ("fullName", email, role, "passwordHash")
-      values (${fullName}, ${email}, 'TEACHER', ${pwd})
+      insert into "User" ("fullName", email, role, "passwordHash", position, degree)
+      values (${fullName}, ${email}, 'TEACHER', ${pwd}, ${position}, ${degree})
       returning *
     `
     teachers.push(t)
@@ -119,8 +137,9 @@ async function main() {
     lysikova: byName['Лысикова Ольга Валерьевна'],
     podsumkova: byName['Подсумкова Людмила Алексеевна'],
     glushkova: byName['Глушкова Юлия Олеговна'],
-    slavnetskova: byName['Славнецкова Людмила Владимировна'],
     makarova: byName['Макарова Светлана Николаевна'],
+    muhina: byName['Мухина Инна Васильевна'],
+    puzanova: byName['Пузанова Елена Александровна'],
   }
 
   console.log('Генерация расписаний (3 недели, преподаватели + группы)...')
@@ -252,7 +271,7 @@ async function main() {
     description: 'Обновить рабочие программы дисциплин на 2026/2027 учебный год и передать на согласование',
     dueDate: dayShift(2),
     forAll: false,
-    recipients: [T.lysikova, T.podsumkova, T.glushkova, T.slavnetskova],
+    recipients: [T.lysikova, T.podsumkova, T.glushkova, T.muhina],
     completedNames: [T.lysikova.fullName],
     createdHoursAgo: 50,
   })
@@ -414,7 +433,7 @@ async function main() {
     [T.lysikova, -1, 'TEACHING', 'Проведено практическое занятие по эконометрии (б8-ЭКОН-31)'],
     [T.podsumkova, -4, 'EDUCATIONAL', 'Организована экскурсия студентов группы б1-МЕНЖ-11 на производственное предприятие'],
     [T.glushkova, -3, 'TEACHING_METHODICAL', 'Разработаны методические указания к курсовой работе по менеджменту'],
-    [T.slavnetskova, -2, 'EDUCATIONAL', 'Проведён профориентационный вебинар для школьников Саратовской области', 'https://www.sstu.ru/'],
+    [T.puzanova, -2, 'EDUCATIONAL', 'Проведён профориентационный вебинар для школьников Саратовской области', 'https://www.sstu.ru/'],
     [T.makarova, -1, 'ORG_METHODICAL', 'Подготовлены материалы к аккредитации образовательной программы'],
     [T.makarova, -5, 'RESEARCH', 'Выступление на конференции «Логистика и управление цепями поставок»'],
     [T.grimashevich, -7, 'TEACHING', 'Проведено лабораторное занятие по информационным технологиям в менеджменте'],
@@ -444,7 +463,7 @@ async function main() {
   console.log(`  Работ в журнале: ${counts.works}`)
   console.log(`  Писем в журнале: ${counts.mails}`)
   console.log('\nДемо-доступ (пароль у всех: demo1234):')
-  console.log('  Заведующий: tregubovvn@outlook.com')
+  console.log('  Заведующий: slavnetskova@pmn.demo')
   console.log(`  Преподаватели: ${teachers[0].email}, ${teachers[1].email}, ...`)
 }
 

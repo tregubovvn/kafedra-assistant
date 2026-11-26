@@ -42,25 +42,12 @@ export default function Page() {
     )
   }
 
-  if (!user) return <LoginView onLogin={setUser} />
-  if (user.role === 'HEAD') {
-    return (
-      <HeadApp
-        user={user}
-        onLogout={() => {
-          setToken(null)
-          setUser(null)
-        }}
-      />
-    )
+  const logout = () => {
+    setToken(null)
+    setUser(null)
   }
-  return (
-    <TeacherApp
-      user={user}
-      onLogout={() => {
-        setToken(null)
-        setUser(null)
-      }}
-    />
-  )
+
+  if (!user) return <LoginView onLogin={setUser} />
+  if (user.role === 'HEAD') return <HeadApp user={user} onLogout={logout} />
+  return <TeacherApp user={user} onLogout={logout} />
 }
