@@ -8,8 +8,14 @@ create table if not exists "User" (
     "passwordHash" text not null,
     "fullName"     text not null,
     role           text not null,
+    position       text not null default '',
+    degree         text not null default '',
     "createdAt"    timestamptz(3) not null default now()
 );
+
+-- для баз, созданных до появления колонок
+alter table "User" add column if not exists position text not null default '';
+alter table "User" add column if not exists degree text not null default '';
 
 create table if not exists "Session" (
     id          serial primary key,

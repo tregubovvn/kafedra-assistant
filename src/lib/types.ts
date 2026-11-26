@@ -5,6 +5,8 @@ export interface AppUser {
   email: string
   fullName: string
   role: 'HEAD' | 'TEACHER'
+  position?: string | null
+  degree?: string | null
 }
 
 export interface WorkItem {
