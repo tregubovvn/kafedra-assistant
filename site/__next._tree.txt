@@ -1,3 +1,3 @@
-:HL["/kafedra-assistant/_next/static/chunks/30b5rn4eo_cwo.css","style"]
+:HL["/kafedra-assistant/_next/static/chunks/3eub8s8gvr171.css","style"]
 1:[["children",{"s":"__PAGE__","h":160}]]
-0:{"b":"eEHcNdMahi-RjTxj4RVim","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
+0:{"b":"O__42P9hm8ce1duygwQXM","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
