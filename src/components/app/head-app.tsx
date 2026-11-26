@@ -53,7 +53,7 @@ export function HeadApp({ user, onLogout }: { user: AppUser; onLogout: () => voi
               <GraduationCap className="size-6" aria-hidden />
             </div>
             <div className="min-w-0">
-              <p className="text-sm leading-tight font-semibold">Ассистент кафедры ПМН</p>
+              <p className="text-sm leading-tight font-semibold">Цифровой помощник зав. кафедрой</p>
               <p className="text-xs leading-tight text-muted-foreground">клиент заведующего</p>
             </div>
           </div>

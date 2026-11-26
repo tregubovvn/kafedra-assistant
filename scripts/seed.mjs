@@ -228,18 +228,18 @@ async function main() {
   }
 
   console.log('Создание поручений...')
-  async function createAssignment({ description, dueDate, forAll, recipients, completedNames, createdHoursAgo }) {
+  async function createAssignment({ title, description, completionCriteria = '', dueTime = '', requireResult = false, dueDate, forAll, recipients, completedNames, createdHoursAgo }) {
     const [a] = await sql`
-      insert into "Assignment" (description, "dueDate", "forAll", "createdBy", "createdAt")
-      values (${description}, ${dueDate}, ${forAll}, ${head.id}, ${hoursAgo(createdHoursAgo)})
+      insert into "Assignment" (title, description, "completionCriteria", "dueDate", "dueTime", "requireResult", "forAll", "createdBy", "createdAt")
+      values (${title ?? description}, ${description}, ${completionCriteria}, ${dueDate}, ${dueTime}, ${requireResult}, ${forAll}, ${head.id}, ${hoursAgo(createdHoursAgo)})
       returning *
     `
     const statusRows = recipients.map((t) => {
       const done = completedNames.includes(t.fullName)
-      return [a.id, t.id, done, done ? hoursAgo(24 + Math.floor(rng() * 96)) : null]
+      return [a.id, t.id, done, done ? hoursAgo(24 + Math.floor(rng() * 96)) : null, done ? 'Выполнено в срок' : '']
     })
     await sql`
-      insert into "AssignmentStatus" ("assignmentId", "teacherId", completed, "completedAt")
+      insert into "AssignmentStatus" ("assignmentId", "teacherId", completed, "completedAt", result)
       values ${sql(statusRows)}
     `
     for (const t of recipients) {
@@ -260,7 +260,11 @@ async function main() {
 
   const all = teachers
   await createAssignment({
+    title: 'Сведения об успеваемости в «Электронный университет»',
     description: 'Внести сведения о текущей успеваемости групп в систему «Электронный университет» до конца дня',
+    completionCriteria: 'Внести данные по всем группам и подтвердить их в системе',
+    dueTime: '18:00',
+    requireResult: true,
     dueDate: today,
     forAll: true,
     recipients: all,
@@ -268,7 +272,11 @@ async function main() {
     createdHoursAgo: 30,
   })
   await createAssignment({
+    title: 'Рабочие программы на 2026/2027 учебный год',
     description: 'Обновить рабочие программы дисциплин на 2026/2027 учебный год и передать на согласование',
+    completionCriteria: 'Обновить РПД и передать их на согласование',
+    dueTime: '17:00',
+    requireResult: true,
     dueDate: dayShift(2),
     forAll: false,
     recipients: [T.lysikova, T.podsumkova, T.glushkova, T.muhina],
@@ -276,7 +284,10 @@ async function main() {
     createdHoursAgo: 50,
   })
   await createAssignment({
+    title: 'Список публикаций за 2026 год',
     description: 'Представить список публикаций за 2026 год для годового отчёта НИР кафедры',
+    completionCriteria: 'Прислать список с полными выходными данными',
+    dueTime: '12:00',
     dueDate: dayShift(12),
     forAll: true,
     recipients: all,
@@ -284,7 +295,10 @@ async function main() {
     createdHoursAgo: 100,
   })
   await createAssignment({
+    title: 'Ведомости в деканат',
     description: 'Передать экзаменационные ведомости за первую волну в деканат',
+    completionCriteria: 'Передать оригиналы ведомостей в деканат',
+    dueTime: '16:00',
     dueDate: dayShift(-10),
     forAll: true,
     recipients: all,
@@ -292,7 +306,10 @@ async function main() {
     createdHoursAgo: 300,
   })
   await createAssignment({
+    title: 'Заявка на ремонт в аудитории 4/103',
     description: 'Оформить заявку на ремонт оборудования в аудитории 4/103',
+    completionCriteria: 'Заполнить заявку и приложить фотографии',
+    dueTime: '15:00',
     dueDate: dayShift(-5),
     forAll: false,
     recipients: [T.uchuvatkin, T.umanskij, T.makarova],
@@ -440,9 +457,10 @@ async function main() {
     [T.goryacheva, -8, 'RESEARCH', 'Руководство выпускной квалификационной работой магистранта'],
   ]
   for (const [u, shift, type, description, newsUrl] of worksData) {
+    const title = description.length > 70 ? description.slice(0, 68).trimEnd() + '…' : description
     await sql`
-      insert into "Work" ("userId", date, type, description, "newsUrl")
-      values (${u.id}, ${dayShift(shift)}, ${type}, ${description}, ${newsUrl ?? null})
+      insert into "Work" ("userId", date, type, title, description, "authorDescription", "newsUrl")
+      values (${u.id}, ${dayShift(shift)}, ${type}, ${title}, ${description}, ${description}, ${newsUrl ?? null})
     `
   }
 

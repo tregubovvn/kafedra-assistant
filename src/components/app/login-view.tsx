@@ -57,7 +57,7 @@ export function LoginView({ onLogin }: { onLogin: (user: AppUser) => void }) {
           <div className="flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
             <GraduationCap className="size-8" aria-hidden />
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">Ассистент кафедры ПМН</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Цифровой помощник зав. кафедрой</h1>
           <p className="text-sm text-muted-foreground">
             Кафедра «Производственный менеджмент»
             <br />

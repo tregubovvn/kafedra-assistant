@@ -1,6 +1,6 @@
 'use client'
 
-// Вкладка «Работа»: журнал выполненных работ преподавателя
+// Журнал работ преподавателя: карточки с названием, описанием и авторским описанием
 
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -15,28 +15,26 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { ArrowUpRight, Plus } from 'lucide-react'
+import { Pencil, Plus, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/client'
-import { WORK_TYPES, WORK_TYPE_LABEL, fmtDate, todayStr, weekdayName } from '@/lib/schedule'
+import { fmtDate, todayStr, WORK_TYPE_LABEL, WORK_TYPES } from '@/lib/schedule'
 import type { WorkItem } from '@/lib/types'
 import { EmptyState, Spinner, WorkTypeBadge } from '@/components/app/bits'
 
 export function WorksTab() {
-  const [works, setWorks] = useState<WorkItem[] | null>(null)
+  const [items, setItems] = useState<WorkItem[] | null>(null)
   const [open, setOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ date: todayStr(), type: '', description: '', newsUrl: '' })
+  const [editing, setEditing] = useState<WorkItem | null>(null)
 
   const load = useCallback(async () => {
     try {
       const res = await api<{ works: WorkItem[] }>('/api/works?mine=1')
-      setWorks(res.works)
+      setItems(res.works)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось загрузить журнал')
-      setWorks([])
+      toast.error(e instanceof Error ? e.message : 'Не удалось загрузить работы')
+      setItems([])
     }
   }, [])
 
@@ -44,142 +42,236 @@ export function WorksTab() {
     void load()
   }, [load])
 
-  async function save() {
-    if (!form.type) {
-      toast.error('Выберите вид работы')
+  return (
+    <section aria-label="Журнал работ" className="grid gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{items ? `${items.length} записей` : ''}</p>
+        <Button
+          size="sm"
+          onClick={() => {
+            setEditing(null)
+            setOpen(true)
+          }}
+        >
+          <Plus aria-hidden />
+          Добавить работу
+        </Button>
+      </div>
+
+      {items === null ? (
+        <Spinner label="Загрузка…" />
+      ) : items.length === 0 ? (
+        <EmptyState title="Журнал пуст" hint="Зафиксируйте первую выполненную работу" />
+      ) : (
+        items.map((w) => (
+          <Card key={w.id} className="py-0">
+            <CardContent className="grid gap-2 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium leading-snug">{w.title || w.description.slice(0, 60)}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{fmtDate(w.date)}</p>
+                </div>
+                <WorkTypeBadge type={w.type} />
+              </div>
+
+              <p className="text-sm whitespace-pre-line">{w.description}</p>
+
+              {w.authorDescription && w.authorDescription !== w.description && (
+                <div className="rounded-lg border border-dashed p-2">
+                  <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                    Описание автора
+                  </p>
+                  <p className="mt-1 text-sm whitespace-pre-line">{w.authorDescription}</p>
+                </div>
+              )}
+
+              {w.newsUrl && (
+                <a className="text-xs text-primary underline underline-offset-2" href={w.newsUrl} target="_blank" rel="noreferrer">
+                  Ссылка на новость
+                </a>
+              )}
+
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setEditing(w)
+                    setOpen(true)
+                  }}
+                >
+                  <Pencil aria-hidden />
+                  Редактировать
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))
+      )}
+
+      <WorkDialog
+        open={open}
+        item={editing}
+        onClose={() => setOpen(false)}
+        onSaved={() => {
+          setOpen(false)
+          void load()
+        }}
+      />
+    </section>
+  )
+}
+
+export function WorkDialog({
+  open,
+  item,
+  onClose,
+  onSaved,
+  headMode = false,
+}: {
+  open: boolean
+  item: WorkItem | null
+  onClose: () => void
+  onSaved: () => void
+  headMode?: boolean
+}) {
+  const isEdit = Boolean(item)
+  const [title, setTitle] = useState('')
+  const [date, setDate] = useState('')
+  const [type, setType] = useState('TEACHING')
+  const [description, setDescription] = useState('')
+  const [authorDescription, setAuthorDescription] = useState('')
+  const [newsUrl, setNewsUrl] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setTitle(item?.title ?? '')
+    setDate(item?.date ?? todayStr())
+    setType(item?.type ?? 'TEACHING')
+    setDescription(item?.description ?? '')
+    setAuthorDescription(item?.authorDescription ?? '')
+    setNewsUrl(item?.newsUrl ?? '')
+  }, [open, item])
+
+  async function improve() {
+    if (description.trim().length < 3) {
+      toast.error('Сначала напишите описание')
       return
     }
+    setAiLoading(true)
+    try {
+      const res = await api<{ text: string }>('/api/deepseek/assist', {
+        method: 'POST',
+        body: { draft: description },
+      })
+      setDescription(res.text)
+      toast.success('Описание обновлено через DeepSeek')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'DeepSeek недоступен')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  async function save() {
     setSaving(true)
     try {
-      await api('/api/works', {
-        method: 'POST',
-        body: { date: form.date, type: form.type, description: form.description, newsUrl: form.newsUrl || undefined },
-      })
-      toast.success('Работа добавлена в журнал')
-      setOpen(false)
-      setForm({ date: todayStr(), type: '', description: '', newsUrl: '' })
-      void load()
+      const body = { title, date, type, description, authorDescription, newsUrl: newsUrl || null }
+      if (isEdit && item) {
+        await api(`/api/works/${item.id}`, { method: 'PATCH', body })
+        toast.success('Работа обновлена')
+      } else {
+        await api('/api/works', { method: 'POST', body })
+        toast.success('Работа добавлена в журнал')
+      }
+      onSaved()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось сохранить')
+      toast.error(e instanceof Error ? e.message : 'Не удалось сохранить работу')
     } finally {
       setSaving(false)
     }
   }
 
-  const byDate = new Map<string, WorkItem[]>()
-  for (const w of works ?? []) {
-    if (!byDate.has(w.date)) byDate.set(w.date, [])
-    byDate.get(w.date)!.push(w)
-  }
-
   return (
-    <section aria-label="Журнал работ">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-base font-semibold">Мои работы</h2>
-        <span className="text-xs text-muted-foreground">{works ? `${works.length} записей` : ''}</span>
-      </div>
+    <Dialog open={open} onOpenChange={(o) => (!o ? onClose() : undefined)}>
+      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? 'Редактировать работу' : 'Новая работа'}</DialogTitle>
+          <DialogDescription>
+            {headMode
+              ? 'Заведующий может уточнить описание работы — в том числе через DeepSeek.'
+              : 'Название, описание, авторская формулировка и дата выполнения.'}
+          </DialogDescription>
+        </DialogHeader>
 
-      {works === null ? (
-        <Spinner label="Загрузка журнала…" />
-      ) : works.length === 0 ? (
-        <EmptyState title="Журнал пуст" hint="Зафиксируйте первую выполненную работу" />
-      ) : (
-        <div className="grid gap-4">
-          {[...byDate.entries()].map(([date, items]) => (
-            <div key={date} className="grid gap-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                {weekdayName(date)}, {fmtDate(date)}
-              </p>
-              {items.map((w) => (
-                <Card key={w.id} className="py-0">
-                  <CardContent className="flex flex-col gap-2 p-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <WorkTypeBadge type={w.type} />
-                      {w.autoGenerated && (
-                        <span className="inline-flex items-center rounded-full border border-green-400 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-800">
-                          Замена
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm leading-snug">{w.description}</p>
-                    {w.newsUrl && (
-                      <a
-                        href={w.newsUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
-                      >
-                        <ArrowUpRight className="size-3.5" aria-hidden />
-                        Ссылка на новость
-                      </a>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
+        <div className="grid gap-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="w-title">Название работы</Label>
+            <Input id="w-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
 
-      <Button
-        size="icon"
-        aria-label="Добавить работу"
-        className="fixed bottom-24 right-4 z-30 size-14 rounded-full shadow-lg md:right-[calc(50%-13rem)]"
-        onClick={() => setOpen(true)}
-      >
-        <Plus className="size-6" aria-hidden />
-      </Button>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Новая работа</DialogTitle>
-            <DialogDescription>Зафиксируйте выполненную работу</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="w-date">Дата</Label>
-                <Input id="w-date" type="date" value={form.date} max={todayStr()} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Вид работы</Label>
-                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {WORK_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {WORK_TYPE_LABEL[t]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="w-date">Дата выполнения</Label>
+              <Input id="w-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="w-desc">Что выполнено</Label>
-              <Textarea
-                id="w-desc"
-                rows={3}
-                placeholder="Например: проведено практическое занятие по менеджменту (б1-МЕНЖ-21)"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="w-news">Ссылка на новость (необязательно)</Label>
-              <Input id="w-news" type="url" placeholder="https://…" value={form.newsUrl} onChange={(e) => setForm({ ...form, newsUrl: e.target.value })} />
+              <Label htmlFor="w-type">Вид работы</Label>
+              <select
+                id="w-type"
+                className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+              >
+                {WORK_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {WORK_TYPE_LABEL[t] ?? t}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-          <DialogFooter>
-            <Button onClick={() => void save()} disabled={saving}>
-              {saving ? 'Сохранение…' : 'Сохранить'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="w-desc">Описание работы</Label>
+            <Textarea id="w-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
+            {headMode && (
+              <div className="flex justify-end">
+                <Button type="button" size="sm" variant="outline" disabled={aiLoading} onClick={() => void improve()}>
+                  <Sparkles aria-hidden />
+                  {aiLoading ? 'DeepSeek…' : 'Улучшить через DeepSeek'}
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="w-author">Описание работы создателем (как написал автор)</Label>
+            <Textarea
+              id="w-author"
+              rows={3}
+              value={authorDescription}
+              onChange={(e) => setAuthorDescription(e.target.value)}
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="w-news">Ссылка на новость (необязательно)</Label>
+            <Input id="w-news" value={newsUrl} onChange={(e) => setNewsUrl(e.target.value)} placeholder="https://…" />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Отмена
+          </Button>
+          <Button disabled={saving || title.trim().length < 3 || description.trim().length < 3 || !date} onClick={() => void save()}>
+            {saving ? 'Сохранение…' : 'Сохранить'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
