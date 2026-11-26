@@ -1,11 +1,7 @@
-# Готовый GitHub Actions workflow.
-# Положить в .github/workflows/main.yml (правка этого пути требует токен со scope `workflow`).
-# Секреты репозитория: HOST, USERNAME, SSH_PRIVATE_KEY.
-#
-# Сборка НЕ выполняется: в репозитории уже лежит готовая статика в site/
-# (обновляется локально: npm run build:static && npm run publish:static).
-
 name: Deploy kafedra-assistant
+
+# Публикация готовой статики из site/ — без сборки и Node на сервере.
+# Обновление сайта: npm run build:static && npm run publish:static, затем коммит site/.
 
 on:
   push:
@@ -20,14 +16,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4.2.2
 
-      - name: Copy static site via SSH
+      - name: Upload site to temp directory
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          source: "site/*"
-          target: "/var/www/html/kafedra-assistant"
-          # без этого файлы лягут в target/site/... вместо корня каталога
-          strip_components: 1
+          source: "site"
+          target: "/tmp/kafedra-deploy"
+
+      - name: Move static files into place
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+            mkdir -p /var/www/html/kafedra-assistant
+            if command -v rsync >/dev/null 2>&1; then
+              rsync -a --delete /tmp/kafedra-deploy/site/ /var/www/html/kafedra-assistant/
+            else
+              find /var/www/html/kafedra-assistant -mindepth 1 -delete
+              cp -a /tmp/kafedra-deploy/site/. /var/www/html/kafedra-assistant/
+            fi
+            rm -rf /tmp/kafedra-deploy
+            ls -la /var/www/html/kafedra-assistant | head -5
