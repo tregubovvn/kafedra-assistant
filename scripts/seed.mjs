@@ -457,7 +457,7 @@ async function main() {
     [T.goryacheva, -8, 'RESEARCH', 'Руководство выпускной квалификационной работой магистранта'],
   ]
   for (const [u, shift, type, description, newsUrl] of worksData) {
-    const title = description.length > 70 ? description.slice(0, 68).trimEnd() + '…' : description
+    const title = description.length > 100 ? description.slice(0, 100).replace(/\s+\S*$/, '').trim() : description
     await sql`
       insert into "Work" ("userId", date, type, title, description, "authorDescription", "newsUrl")
       values (${u.id}, ${dayShift(shift)}, ${type}, ${title}, ${description}, ${description}, ${newsUrl ?? null})
