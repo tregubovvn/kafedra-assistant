@@ -55,6 +55,20 @@ export function fmtDateShort(s: string): string {
   return `${d}.${m}`
 }
 
+// Время из ISO-строки в формате ЧЧ:ММ (локальное)
+export function fmtTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// «26.11.2026, 14:32» из ISO-строки
+export function fmtDateTime(iso: string): string {
+  const time = fmtTime(iso)
+  const date = iso.slice(0, 10)
+  return time ? `${fmtDate(date)}, ${time}` : fmtDate(date)
+}
+
 export function daysLeft(dueDate: string): number {
   const a = dateFromStr(todayStr()).getTime()
   const b = dateFromStr(dueDate).getTime()

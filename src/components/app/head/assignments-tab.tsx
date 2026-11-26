@@ -21,7 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Pencil, Plus, Sparkles, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/client'
-import { fmtDate, todayStr } from '@/lib/schedule'
+import { fmtDate, fmtDateTime, todayStr } from '@/lib/schedule'
 import type { AppUser, AssignmentItem } from '@/lib/types'
 import { EmptyState, Spinner, UrgencyBadge, UrgencyLegend } from '@/components/app/bits'
 
@@ -137,6 +137,9 @@ export function HeadAssignmentsTab() {
                       {s.teacherFullName}
                       <span className="ml-auto shrink-0 font-medium">{s.completed ? 'выполнил' : 'не выполнил'}</span>
                     </span>
+                    {s.completed && s.completedAt && (
+                      <span className="text-[11px] opacity-80">{fmtDateTime(s.completedAt)}</span>
+                    )}
                     {s.result && <span className="text-[11px] opacity-80">Результат: {s.result}</span>}
                   </span>
                 ))}
