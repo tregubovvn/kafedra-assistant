@@ -874,6 +874,27 @@ export async function api<T = unknown>(
   }
 
   // ---------- расписание ----------
+  // ---------- расписание кафедры с rasp.sstu.ru ----------
+  if (p === '/api/rasp' && method === 'GET') {
+    const today = new Date().toISOString().slice(0, 10)
+    const rows = await rest<
+      { teacherName: string; date: string; pairNumber: number; discipline: string; kind: string; groupId: string; room: string }[]
+    >(
+      `RaspEntry?select="teacherName",date,"pairNumber",discipline,kind,"groupId",room&date=gte.${today}&order=date.asc,"pairNumber".asc&limit=2000`
+    )
+    return {
+      lessons: rows.map((r) => ({
+        teacherName: r.teacherName,
+        date: r.date,
+        pairNumber: r.pairNumber,
+        discipline: r.discipline,
+        kind: r.kind ?? '',
+        groupId: r.groupId ?? '',
+        room: r.room ?? '',
+      })),
+    } as T
+  }
+
   if (p === '/api/schedule' && method === 'GET') {
     const me = requireUser()
 

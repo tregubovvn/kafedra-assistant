@@ -132,3 +132,21 @@ create table if not exists "MailLog" (
     body        text not null,
     "createdAt" timestamptz(3) not null default now()
 );
+
+-- Расписание кафедры с rasp.sstu.ru (синхронизируется scripts/sync-rasp.mjs)
+
+create table if not exists "RaspEntry" (
+    id           serial primary key,
+    "teacherName" text not null,
+    date         text not null,
+    "pairNumber" integer not null,
+    discipline   text not null,
+    kind         text not null default '',
+    "groupId"    text not null default '',
+    room         text not null default '',
+    "syncedAt"   timestamptz(3) not null default now()
+);
+
+create index if not exists "RaspEntry_date_idx" on "RaspEntry" (date);
+
+alter table "RaspEntry" disable row level security;
